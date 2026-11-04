@@ -1,5 +1,6 @@
 import { Git } from "./git";
 import { KnowledgeBase, KnowledgeEntry, ReminderEntry } from "./storage";
+import { FocusItem, rankScribeEntries } from "./merge";
 
 export interface ScribeOptions {
   workspacePath: string;
@@ -40,5 +41,12 @@ export class Scribe {
    */
   readKnowledge(month?: string): KnowledgeEntry[] {
     return this.storage.readKnowledge(month);
+  }
+
+  /**
+   * Rank accumulated Scribe knowledge entries for Flint's focus merge.
+   */
+  rank(month?: string): FocusItem[] {
+    return rankScribeEntries(this.storage.readKnowledge(month));
   }
 }
