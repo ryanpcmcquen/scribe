@@ -12,7 +12,15 @@ export {
   redactHomePaths,
 } from "./storage";
 export { Git, isRemoteTarget } from "./git";
-export { rankReminders, rankScribeEntries, composeFocus } from "./merge";
+export {
+  composeFocus,
+  composeFocusFromInput,
+  formatFocusBullets,
+  normalizeExternalCandidates,
+  rankReminders,
+  rankScribeEntries,
+  SOURCE_DEFAULT_WEIGHTS,
+} from "./merge";
 export { buildContextPack, searchKnowledgeBase } from "./search";
 export {
   DEFAULT_AGENT,
@@ -58,7 +66,14 @@ export type {
   CaptureResult,
   ReminderUpdateResult,
 } from "./scribe";
-export type { FocusItem, FocusSourceContribution } from "./merge";
+export type {
+  ComposeFocusInput,
+  ComposeFocusOptions,
+  ExternalFocusCandidate,
+  FocusItem,
+  FocusSourceContribution,
+  FocusSourceKind,
+} from "./merge";
 export type {
   ContextOptions,
   ContextPack,

@@ -30,7 +30,11 @@ import {
   uninstallGitHook,
 } from "./hooks";
 import { runMcpServer } from "./mcp";
-import { FocusItem } from "./merge";
+import {
+  ComposeFocusInput,
+  FocusItem,
+  formatFocusBullets,
+} from "./merge";
 import { Scribe } from "./scribe";
 import {
   effectiveReminderStatus,
@@ -63,6 +67,7 @@ interface CaptureInput {
 
 const BOOLEAN_FLAGS = new Set([
   "all",
+  "bullets",
   "dry-run",
   "force",
   "git",
@@ -688,10 +693,18 @@ function commandContext(args: ParsedArgs, config: ScribeConfig): number {
   return 0;
 }
 
-function commandFocus(args: ParsedArgs, config: ScribeConfig): number {
+async function commandFocus(
+  args: ParsedArgs,
+  config: ScribeConfig,
+): Promise<number> {
   const json = flagBool(args.flags, "json");
   const all = flagBool(args.flags, "all");
+  const bulletsOnly = flagBool(args.flags, "bullets");
+  const useStdin = flagBool(args.flags, "stdin");
   const month = flagString(args.flags, "month");
+  const workspace = flagString(args.flags, "repo");
+  const limitRaw = flagString(args.flags, "limit");
+  const limit = limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : undefined;
 
   if (all && month) {
     throw new Error("use either --month or --all, not both");
@@ -699,16 +712,50 @@ function commandFocus(args: ParsedArgs, config: ScribeConfig): number {
   if (month && !isMonth(month)) {
     throw new Error(`invalid month "${month}" (expected YYYY-MM)`);
   }
+  if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
+    throw new Error(`invalid limit "${limitRaw}" (expected positive integer)`);
+  }
+
+  let externalInput: ComposeFocusInput = {};
+  if (useStdin) {
+    const raw = await readStdin();
+    if (raw.trim()) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (error) {
+        throw new Error(`invalid JSON on stdin: ${(error as Error).message}`);
+      }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("stdin JSON must be an object");
+      }
+      externalInput = parsed as ComposeFocusInput;
+    }
+  }
 
   const scribe = new Scribe({
     workspacePath: config.workspace,
     autoCommit: false,
     autoPush: false,
   });
-  const items = all ? scribe.rankAll() : scribe.rank(month);
+  const { items, bullets } = scribe.composeBrief(externalInput, {
+    month,
+    all,
+    workspace,
+    limit,
+  });
 
   if (json) {
-    printJson({ ok: true, month: all ? null : month ?? currentMonth(), items });
+    printJson({
+      ok: true,
+      month: all ? null : month ?? currentMonth(),
+      items,
+      bullets: bullets.trim() ? bullets.trim().split("\n") : [],
+    });
+  } else if (bulletsOnly) {
+    if (bullets) {
+      process.stdout.write(bullets);
+    }
   } else {
     printFocus(items);
   }

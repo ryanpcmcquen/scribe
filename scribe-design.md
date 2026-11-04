@@ -47,7 +47,7 @@ Scribe ships a dependency-free Node CLI (`src/cli.ts`):
     scribe capture --stdin          # JSON entry from stdin
     scribe read [--month YYYY-MM] [--all] [--repo <path>] [--json]
     scribe reminders [done|snooze|reopen <query>] [--status pending|done|snoozed|all] [--pending] [--json]
-    scribe focus [--month YYYY-MM] [--all] [--json]
+    scribe focus [--month YYYY-MM] [--all] [--repo <path>] [--limit <N>] [--stdin] [--bullets] [--json]
     scribe search [<query>] [--repo <path>] [--category <cat>] [--status <status>] [--limit <N>] [--json]
     scribe context [--repo <path>] [--query <text>] [--limit <N>] [--json]
     scribe mcp
@@ -190,6 +190,4 @@ Flint produces a ranked focus list and overview from this merged input.
 
 ## Next steps
 
-- Add reminder lifecycle commands (`done`, `snooze`) and focus integration.
-- Add cross-month search / context retrieval.
-- Wire Flint's read/merge path to the CLI's JSON output.
+- Optional UI / digest formatting enhancements as real-world journal volume grows.

@@ -9,8 +9,12 @@ import {
 } from "./storage";
 import {
   composeFocus,
+  composeFocusFromInput,
+  ComposeFocusInput,
+  ComposeFocusOptions,
   FocusItem,
   FocusSourceContribution,
+  formatFocusBullets,
   rankReminders,
   rankScribeEntries,
 } from "./merge";
@@ -264,7 +268,25 @@ export class Scribe {
   compose(
     month: string | undefined,
     additionalSources: FocusSourceContribution[] = [],
+    options: ComposeFocusOptions = {},
   ): FocusItem[] {
-    return composeFocus(this.rank(month), additionalSources);
+    return composeFocus(this.rank(month, options.asOfDate), additionalSources, options);
+  }
+
+  /**
+   * Compose Scribe's ranked entries with external git/session/MCP candidates.
+   */
+  composeBrief(
+    input: ComposeFocusInput = {},
+    options: ComposeFocusOptions & { month?: string; all?: boolean } = {},
+  ): { items: FocusItem[]; bullets: string } {
+    const base = options.all
+      ? this.rankAll(options.asOfDate)
+      : this.rank(options.month, options.asOfDate);
+    const items = composeFocusFromInput(base, input, options);
+    return {
+      items,
+      bullets: formatFocusBullets(items),
+    };
   }
 }

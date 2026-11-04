@@ -158,6 +158,23 @@ scribe context --repo "$PWD"
 scribe context --repo "$PWD" --query "storage layout" --json
 ```
 
+### Multi-Source Focus & Flint Merge
+
+Compose Scribe's ranked knowledge and pending reminders with external git,
+session, and MCP inputs, or emit `- <workspace>: <title>` bullets directly for
+Flint's morning brief:
+
+```bash
+scribe focus --bullets --limit 5
+scribe focus --stdin --limit 5 --json <<'JSON'
+{
+  "git": [{ "title": "Finish uncommitted changes", "workspace": "~/code/flint", "uncommitted": true }],
+  "mcp": [{ "title": "Reply to release thread", "workspace": "slack", "priority": "p1" }],
+  "sessions": [{ "title": "Pick up: Scribe build", "workspace": "~/code/scribe" }]
+}
+JSON
+```
+
 Capture options:
 
 | Option | Description |
