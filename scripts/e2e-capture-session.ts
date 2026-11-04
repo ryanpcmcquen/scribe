@@ -15,8 +15,10 @@ async function main(): Promise<void> {
     body: "Built Scribe design into implementation: capture skills for OpenCode, Claude Code, Cline, Codex, Antigravity; storage/git scaffold; E2E capture/read/merge; README with logo; pushes. Design decisions: monthly split storage, always-automatic capture, configurable workspace, commit+push-if-remote.",
   };
 
-  const path = await scribe.record(entry);
-  console.log(`Scribe capture: recorded entry -> ${path}`);
+  const result = await scribe.record(entry);
+  console.log(
+    `Scribe capture: recorded entry -> ${result.path} (committed: ${result.committed}, pushed: ${result.pushed})`,
+  );
 }
 
 main().catch((err) => {

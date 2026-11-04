@@ -1,0 +1,33 @@
+{
+  "name": "scribe",
+  "version": "0.1.0",
+  "description": "A standalone markdown knowledge base companion for AI-assisted software work.",
+  "license": "MIT",
+  "author": "Ryan McQuen",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "scribe": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "EXAMPLE",
+    "README.md",
+    "LICENSE.txt"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/cli.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/*.test.js",
+    "cli": "node dist/cli.js",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}

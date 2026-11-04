@@ -19,25 +19,53 @@ sessions (human or agent) can surface accumulated tribal knowledge.
 
 ## Capture process
 
-1. Determine the current month as `YYYY-MM` and today's date as `YYYY-MM-DD`.
-2. Locate the knowledge file at `<scribe workspace>/knowledge/<YYYY-MM>/<YYYY-MM>-knowledge.md`.
-3. If it does not exist, create it with the `## YYYY-MM` heading.
-4. Append a new entry under that heading:
+1. Use the Scribe CLI. Do not edit journal markdown or run git yourself.
 
-   ### YYYY-MM-DD — <title>
+   If `scribe --version` fails, Scribe is not installed. Do not prompt the user; continue the
+   session without capturing. Install it with `npm link` from a Scribe checkout.
 
-   - **Workspace:** <path>
-   - **Agent:** Codex
-   - **Category:** <finding | decision | work-log>
+2. Capture a knowledge entry:
 
-   <free-form markdown body>
+   ```bash
+   scribe capture \
+     --agent "Codex" \
+     --title "<short, factual title>" \
+     --category "<finding|decision|work-log>" \
+     --repo "$PWD" \
+     --body "<concise markdown body>"
+   ```
 
-5. Commit the change to the Scribe git repo and push if a remote is configured.
+   For multi-line bodies, send JSON on stdin and keep flags for shared context:
+
+   ```bash
+   scribe capture --stdin --agent "Codex" --repo "$PWD" <<'JSON'
+   {
+     "title": "<short, factual title>",
+     "category": "decision",
+     "body": "First paragraph.\n\nSecond paragraph."
+   }
+   JSON
+   ```
+
+3. Capture a reminder when something must be revisited:
+
+   ```bash
+   scribe capture \
+     --agent "Codex" \
+     --title "<short, factual title>" \
+     --priority "<p1|p2|p3>" \
+     --context "<why it matters>" \
+     --action "<what to do next>"
+   ```
+
+4. The CLI writes the monthly file, commits, and pushes when a remote is configured. Add
+   `--json` when you need to confirm the `path`, `committed`, and `pushed` fields.
 
 ## Rules
 
 - Always automatic: just take notes, commit, and push if a remote is configured. Never ask the
   user for consent or to be prompted.
 - Never prompt the user to record.
+- Use `scribe capture`; never hand-edit journal files or run `git` in the journal.
 - Keep entries concise, factual, and useful for future agents.
 - Do not rewrite or clean up historical entries unless correcting a factual error.

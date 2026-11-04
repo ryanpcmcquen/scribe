@@ -1,6 +1,7 @@
 # Scribe — Design Document
 
-> Status: design / planning. Reviewed against the current Flint codebase on 2026-11-02.
+> Status: implemented core. CLI, config, storage, git, read/focus, tests, and capture skills
+> updated on 2026-11-04. Capture reliability design is next.
 
 ## Purpose
 
@@ -30,11 +31,36 @@ works, without asking the user anything or requiring manual recording.
 
 - Trigger: agent-side skills/prompts for the "top" CLI tools (Claude Code, Cline, OpenCode,
   Codex, Antigravity, etc.).
-- Action: agents append findings / decisions / work-log entries into the knowledge base.
+- Action: agents call `scribe capture`; they do not hand-edit markdown or run git in the
+  journal.
 - Behavior: during sessions, always automatic — just take notes, commit to the repo, and
   push if it has a remote. No user prompts or consent.
 - CLI scope: support the same CLI tools as Flint; capture skills now exist for Claude Code,
   Cline, OpenCode, Codex, and Antigravity under `skills/<cli>/scribe-capture.md`.
+
+## CLI + configuration
+
+Scribe ships a dependency-free Node CLI (`src/cli.ts`):
+
+    scribe init
+    scribe capture --title <title> --category <category> --body <markdown>
+    scribe capture --stdin          # JSON entry from stdin
+    scribe read [--month YYYY-MM] [--all] [--json]
+    scribe reminders [--month YYYY-MM] [--all] [--json]
+    scribe focus [--month YYYY-MM] [--all] [--json]
+    scribe doctor [--json]
+    scribe config [--json]
+
+- Capture validates local dates, writes the monthly file, commits, and pushes when a remote
+  exists. `--dry-run` validates without writing.
+- Config defaults to `~/.config/scribe/config.json` (XDG-aware) with `workspace`, `remote`,
+  `agent`, `autoCommit`, and `autoPush` keys. Precedence is flags → environment → config →
+  defaults.
+- Environment overrides: `SCRIBE_CONFIG`, `SCRIBE_WORKSPACE`, `SCRIBE_REMOTE`,
+  `SCRIBE_AGENT`, `SCRIBE_AUTO_COMMIT`, `SCRIBE_AUTO_PUSH`.
+- `scribe doctor` checks workspace existence, repository root, remotes, and config presence.
+- The test suite covers date validation, config precedence, storage round-trips, CLI
+  init/capture/read/reminders/focus/doctor, JSON stdin, dry-run, and commit behavior.
 
 ## Storage format
 
@@ -152,14 +178,16 @@ Flint produces a ranked focus list and overview from this merged input.
 
 ## Open design questions
 
-- Whether Scribe's knowledge repo should be its own default or shared with Flint's journal
-  via a configuration option (shareable if both installed, separate by default).
-- Markdown entry schema details (fields per entry: date, workspace, findings, decisions, etc.).
+- Capture reliability: whether to enforce capture with agent hooks/plugins, an MCP server, or
+  keep relying on skills.
+- Search / context retrieval across months: ranking, filtering by workspace, and how much
+  context to hand to agents.
+- Reminder lifecycle: pending/done/snooze representation and how reminders enter focus.
 - Precedence/weighting rules when merging Scribe entries into Flint's focus.
 
 ## Next steps
 
-- Capture/skill generation: capture skills in place for Claude Code, Cline, OpenCode, Codex,
-  and Antigravity.
-- Implement Scribe storage + git push.
-- Wire Flint's read/merge path.
+- Design and implement capture reliability (hooks/plugin or MCP server).
+- Add reminder lifecycle commands and focus integration.
+- Add cross-month search / context retrieval.
+- Wire Flint's read/merge path to the CLI's JSON output.

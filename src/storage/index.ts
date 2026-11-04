@@ -1,5 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "fs";
 import { dirname } from "path";
+import { currentMonth } from "../date";
 
 export interface KnowledgeEntry {
   date: string; // YYYY-MM-DD
@@ -18,6 +26,10 @@ export interface ReminderEntry {
   action: string;
 }
 
+export type ScribeEntry = KnowledgeEntry | ReminderEntry;
+
+export type EntryKind = "knowledge" | "reminders";
+
 export class KnowledgeBase {
   constructor(private readonly workspacePath: string) {}
 
@@ -29,29 +41,41 @@ export class KnowledgeBase {
     return `${this.workspacePath}/reminders/${month}/${month}-reminders.md`;
   }
 
+  knowledgeFileFor(date: string): string {
+    return this.knowledgePath(date.slice(0, 7)); // YYYY-MM
+  }
+
+  reminderFileFor(date: string): string {
+    return this.remindersPath(date.slice(0, 7)); // YYYY-MM
+  }
+
+  private ensureFile(filePath: string, month: string): void {
+    mkdirSync(dirname(filePath), { recursive: true });
+    if (!existsSync(filePath)) {
+      writeFileSync(filePath, `## ${month}\n`);
+    }
+  }
+
   appendKnowledgeEntry(entry: KnowledgeEntry): string {
     const month = entry.date.slice(0, 7); // YYYY-MM
     const filePath = this.knowledgePath(month);
-    mkdirSync(dirname(filePath), { recursive: true });
-    const content = existsSync(filePath) ? readFileSync(filePath, "utf8") : `## ${month}\n`;
+    this.ensureFile(filePath, month);
     const entryBlock = `\n### ${entry.date} — ${entry.title}\n\n- **Workspace:** ${entry.workspace}\n- **Agent:** ${entry.agent}\n- **Category:** ${entry.category}\n\n${entry.body}\n`;
-    writeFileSync(filePath, content.endsWith("\n") ? content + entryBlock : content + entryBlock);
+    appendFileSync(filePath, entryBlock);
     return filePath;
   }
 
   appendReminder(entry: ReminderEntry): string {
     const month = entry.date.slice(0, 7); // YYYY-MM
     const filePath = this.remindersPath(month);
-    mkdirSync(dirname(filePath), { recursive: true });
-    const content = existsSync(filePath) ? readFileSync(filePath, "utf8") : `## ${month}\n`;
+    this.ensureFile(filePath, month);
     const entryBlock = `\n### ${entry.date} — ${entry.title}\n\n- **Priority:** ${entry.priority}\n- **Context:** ${entry.context}\n\n${entry.action}\n`;
-    writeFileSync(filePath, content.endsWith("\n") ? content + entryBlock : content + entryBlock);
+    appendFileSync(filePath, entryBlock);
     return filePath;
   }
 
-  readKnowledge(month?: string): KnowledgeEntry[] {
-    const monthKey = month ?? new Date().toISOString().slice(0, 7);
-    const filePath = this.knowledgePath(monthKey);
+  readKnowledge(month: string = currentMonth()): KnowledgeEntry[] {
+    const filePath = this.knowledgePath(month);
     if (!existsSync(filePath)) return [];
 
     const content = readFileSync(filePath, "utf8");
@@ -93,5 +117,67 @@ export class KnowledgeBase {
     }
 
     return entries;
+  }
+
+  readReminders(month: string = currentMonth()): ReminderEntry[] {
+    const filePath = this.remindersPath(month);
+    if (!existsSync(filePath)) return [];
+
+    const content = readFileSync(filePath, "utf8");
+    const entries: ReminderEntry[] = [];
+    const blocks = content.split(/^### /m).slice(1);
+
+    for (const block of blocks) {
+      const header = block.split("\n")[0] ?? "";
+      const match = header.match(/^(\d{4}-\d{2}-\d{2}) — (.+)$/);
+      if (!match) continue;
+
+      const date = match[1];
+      const title = match[2];
+      const fields: Record<string, string> = {};
+      const actionLines: string[] = [];
+
+      const lines = block.split("\n");
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (/^### /.test(line)) {
+          break;
+        }
+        const fieldMatch = line.match(/^-\s+\*\*(.+?)\*\*\s*:?\s*(.*)$/);
+        if (fieldMatch) {
+          fields[fieldMatch[1].replace(/:$/, "").trim()] = fieldMatch[2].trim();
+        } else {
+          actionLines.push(line);
+        }
+      }
+
+      entries.push({
+        date,
+        title,
+        priority: (fields["Priority"] ?? "p2") as ReminderEntry["priority"],
+        context: fields["Context"] ?? "",
+        action: actionLines.join("\n").trim(),
+      });
+    }
+
+    return entries;
+  }
+
+  readAllKnowledge(): KnowledgeEntry[] {
+    return this.listMonths("knowledge").flatMap((month) => this.readKnowledge(month));
+  }
+
+  readAllReminders(): ReminderEntry[] {
+    return this.listMonths("reminders").flatMap((month) => this.readReminders(month));
+  }
+
+  listMonths(kind: EntryKind): string[] {
+    const root = `${this.workspacePath}/${kind}`;
+    if (!existsSync(root)) return [];
+
+    return readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && /^\d{4}-\d{2}$/.test(entry.name))
+      .map((entry) => entry.name)
+      .sort();
   }
 }
