@@ -4,3 +4,6 @@
 /reminders/
 
 # Example content is intentionally tracked under EXAMPLE/.
+
+# macOS metadata
+.DS_Store
