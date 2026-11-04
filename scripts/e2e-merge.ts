@@ -6,8 +6,8 @@ async function main(): Promise<void> {
     repoPath: process.cwd(),
   });
 
-  const items = scribe.rank("2026-11");
-  console.log(JSON.stringify(items, null, 2));
+  const focus = scribe.compose("2026-11");
+  console.log(JSON.stringify(focus, null, 2));
 }
 
 main().catch((err) => {

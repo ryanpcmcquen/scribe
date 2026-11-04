@@ -6,16 +6,17 @@ export interface FocusItem {
   source: "scribe";
 }
 
+export interface FocusSourceContribution {
+  source: string;
+  items: FocusItem[];
+}
+
 const CATEGORY_WEIGHTS: Record<string, number> = {
   decision: 3,
   finding: 2,
   "work-log": 1,
 };
 
-/**
- * Rank Scribe knowledge entries for Flint's focus synthesis.
- * Higher scores surface higher-priority accumulated knowledge.
- */
 export function rankScribeEntries(entries: KnowledgeEntry[]): FocusItem[] {
   const items: FocusItem[] = entries.map((entry) => ({
     entry,
@@ -23,4 +24,12 @@ export function rankScribeEntries(entries: KnowledgeEntry[]): FocusItem[] {
     source: "scribe" as const,
   }));
   return items.sort((a, b) => b.score - a.score);
+}
+
+export function composeFocus(scribeItems: FocusItem[], additionalSources: FocusSourceContribution[] = []): FocusItem[] {
+  const merged: FocusItem[] = [...scribeItems];
+  for (const source of additionalSources) {
+    merged.push(...source.items);
+  }
+  return merged.sort((a, b) => b.score - a.score);
 }

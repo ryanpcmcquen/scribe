@@ -1,6 +1,6 @@
 import { Git } from "./git";
 import { KnowledgeBase, KnowledgeEntry, ReminderEntry } from "./storage";
-import { FocusItem, rankScribeEntries } from "./merge";
+import { composeFocus, FocusItem, FocusSourceContribution, rankScribeEntries } from "./merge";
 
 export interface ScribeOptions {
   workspacePath: string;
@@ -48,5 +48,14 @@ export class Scribe {
    */
   rank(month?: string): FocusItem[] {
     return rankScribeEntries(this.storage.readKnowledge(month));
+  }
+
+  /**
+   * Compose Scribe's ranked knowledge into Flint's focus list, merging
+   * additional sources when provided.
+   */
+  compose(month: string | undefined, additionalSources: FocusSourceContribution[] = []): FocusItem[] {
+    const items = this.rank(month);
+    return composeFocus(items, additionalSources);
   }
 }
