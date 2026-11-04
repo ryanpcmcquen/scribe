@@ -1,7 +1,8 @@
 # Scribe — Design Document
 
-> Status: implemented core. CLI, config, storage, git, read/focus, tests, and capture skills
-> updated on 2026-11-04. Capture reliability design is next.
+> Status: implemented core + capture reliability. CLI, config, storage, git, read/focus,
+> stdio MCP server, git/agent hooks, OpenCode V2 plugin, tests, and capture skills updated on
+> 2026-11-04.
 
 ## Purpose
 
@@ -178,8 +179,6 @@ Flint produces a ranked focus list and overview from this merged input.
 
 ## Open design questions
 
-- Capture reliability: whether to enforce capture with agent hooks/plugins, an MCP server, or
-  keep relying on skills.
 - Search / context retrieval across months: ranking, filtering by workspace, and how much
   context to hand to agents.
 - Reminder lifecycle: pending/done/snooze representation and how reminders enter focus.
@@ -187,7 +186,6 @@ Flint produces a ranked focus list and overview from this merged input.
 
 ## Next steps
 
-- Design and implement capture reliability (hooks/plugin or MCP server).
-- Add reminder lifecycle commands and focus integration.
+- Add reminder lifecycle commands (`done`, `snooze`) and focus integration.
 - Add cross-month search / context retrieval.
 - Wire Flint's read/merge path to the CLI's JSON output.

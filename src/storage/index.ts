@@ -6,8 +6,21 @@ import {
   readFileSync,
   writeFileSync,
 } from "fs";
+import { homedir } from "os";
 import { dirname } from "path";
 import { currentMonth } from "../date";
+
+/**
+ * Replace any occurrence of the current user's home directory path with `~`
+ * so private home-directory paths are never written to the journal.
+ */
+export function redactHomePaths(text: string, home: string = homedir()): string {
+  if (!text || !home || home === "/") return text;
+  const normalized = home.replace(/\/+$/, "");
+  if (!normalized) return text;
+  const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(new RegExp(`${escaped}(?=/|$|\\s|[.)"'\\],:;])`, "g"), "~");
+}
 
 export interface KnowledgeEntry {
   date: string; // YYYY-MM-DD
@@ -56,20 +69,69 @@ export class KnowledgeBase {
     }
   }
 
+  sanitizeKnowledgeEntry(entry: KnowledgeEntry): KnowledgeEntry {
+    return {
+      ...entry,
+      title: redactHomePaths(entry.title).trim(),
+      workspace: redactHomePaths(entry.workspace).trim(),
+      agent: entry.agent.trim(),
+      body: redactHomePaths(entry.body).trim(),
+    };
+  }
+
+  sanitizeReminderEntry(entry: ReminderEntry): ReminderEntry {
+    return {
+      ...entry,
+      title: redactHomePaths(entry.title).trim(),
+      context: redactHomePaths(entry.context).trim(),
+      action: redactHomePaths(entry.action).trim(),
+    };
+  }
+
+  hasDuplicateKnowledge(entry: KnowledgeEntry): boolean {
+    const sanitized = this.sanitizeKnowledgeEntry(entry);
+    const month = sanitized.date.slice(0, 7);
+    const existing = this.readKnowledge(month);
+    return existing.some(
+      (candidate) =>
+        candidate.date === sanitized.date &&
+        candidate.title.toLowerCase() === sanitized.title.toLowerCase() &&
+        candidate.workspace === sanitized.workspace &&
+        candidate.category === sanitized.category &&
+        candidate.body === sanitized.body,
+    );
+  }
+
+  hasDuplicateReminder(entry: ReminderEntry): boolean {
+    const sanitized = this.sanitizeReminderEntry(entry);
+    const month = sanitized.date.slice(0, 7);
+    const existing = this.readReminders(month);
+    return existing.some(
+      (candidate) =>
+        candidate.date === sanitized.date &&
+        candidate.title.toLowerCase() === sanitized.title.toLowerCase() &&
+        candidate.priority === sanitized.priority &&
+        candidate.context === sanitized.context &&
+        candidate.action === sanitized.action,
+    );
+  }
+
   appendKnowledgeEntry(entry: KnowledgeEntry): string {
-    const month = entry.date.slice(0, 7); // YYYY-MM
+    const sanitized = this.sanitizeKnowledgeEntry(entry);
+    const month = sanitized.date.slice(0, 7); // YYYY-MM
     const filePath = this.knowledgePath(month);
     this.ensureFile(filePath, month);
-    const entryBlock = `\n### ${entry.date} — ${entry.title}\n\n- **Workspace:** ${entry.workspace}\n- **Agent:** ${entry.agent}\n- **Category:** ${entry.category}\n\n${entry.body}\n`;
+    const entryBlock = `\n### ${sanitized.date} — ${sanitized.title}\n\n- **Workspace:** ${sanitized.workspace}\n- **Agent:** ${sanitized.agent}\n- **Category:** ${sanitized.category}\n\n${sanitized.body}\n`;
     appendFileSync(filePath, entryBlock);
     return filePath;
   }
 
   appendReminder(entry: ReminderEntry): string {
-    const month = entry.date.slice(0, 7); // YYYY-MM
+    const sanitized = this.sanitizeReminderEntry(entry);
+    const month = sanitized.date.slice(0, 7); // YYYY-MM
     const filePath = this.remindersPath(month);
     this.ensureFile(filePath, month);
-    const entryBlock = `\n### ${entry.date} — ${entry.title}\n\n- **Priority:** ${entry.priority}\n- **Context:** ${entry.context}\n\n${entry.action}\n`;
+    const entryBlock = `\n### ${sanitized.date} — ${sanitized.title}\n\n- **Priority:** ${sanitized.priority}\n- **Context:** ${sanitized.context}\n\n${sanitized.action}\n`;
     appendFileSync(filePath, entryBlock);
     return filePath;
   }

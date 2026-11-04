@@ -25,6 +25,7 @@ export interface CaptureResult {
   path: string;
   committed: boolean;
   pushed: boolean;
+  deduplicated?: boolean;
   pushError?: string;
 }
 
@@ -47,6 +48,20 @@ export class Scribe {
    * Capture an entry: write to the knowledge/reminders store, commit, push.
    */
   async record(entry: ScribeEntry): Promise<CaptureResult> {
+    const isDuplicate =
+      "category" in entry
+        ? this.storage.hasDuplicateKnowledge(entry)
+        : this.storage.hasDuplicateReminder(entry);
+
+    if (isDuplicate) {
+      return {
+        path: this.pathFor(entry),
+        committed: false,
+        pushed: false,
+        deduplicated: true,
+      };
+    }
+
     const path =
       "category" in entry
         ? this.storage.appendKnowledgeEntry(entry)

@@ -68,6 +68,9 @@ Commands:
   read       Read knowledge entries
   reminders  Read reminders
   focus      Rank knowledge entries for a focus list
+  mcp        Start the Model Context Protocol (MCP) server on stdio
+  hook       Run an automatic capture hook (post-commit, agent-stop)
+  hooks      Install, uninstall, or check git hooks and agent skills
   doctor     Check config, workspace, git, and remote
   config     Show resolved configuration
   help       Show help
@@ -141,7 +144,34 @@ Capture options:
 
 By default, capture writes the monthly file, commits to the journal repo, and
 pushes when a remote is configured. Offline or remote-less journals still
-commit locally; push is a no-op.
+commit locally; push is a no-op. Identical entries recorded on the same day are
+deduplicated automatically (`deduplicated: true`), and any home-directory path
+in entry fields is scrubbed to `~`.
+
+## Capture reliability (MCP, hooks, and OpenCode plugin)
+
+Skills alone can miss captures when an agent forgets to load the skill or
+finishes a commit/session without invoking `scribe capture`. Scribe layers three
+automatic mechanisms on top of the skills:
+
+1. **Built-in stdio MCP server (`scribe mcp`)** — exposes `scribe_capture`,
+   `scribe_read`, `scribe_reminders`, and `scribe_focus` tools plus
+   `scribe://knowledge/current`, `scribe://reminders/current`, and
+   `scribe://focus/current` resources over JSON-RPC 2.0 stdio (supporting both
+   newline-delimited and `Content-Length` framing).
+2. **Automatic git & agent hooks (`scribe hook` / `scribe hooks`)**:
+   - `scribe hooks install --git --repo <path>` installs a managed,
+     non-destructive `post-commit` hook that records commits into Scribe
+     (skipping the Scribe journal repo itself and deduplicating already-recorded
+     commits).
+   - `scribe hook agent-stop --stdin` accepts agent stop-hook JSON payloads (or
+     falls back to capturing today's latest commit in the workspace).
+   - `scribe hooks install --skills` syncs the OpenCode capture skill into
+     `~/.config/opencode/skills/scribe-capture/SKILL.md`.
+3. **OpenCode V2 server plugin (`dist/plugins/opencode.js`)** — registers the
+   four Scribe tools natively, injects the Scribe capture directive into
+   session context hooks so the model never forgets to record findings and
+   decisions, and captures unrecorded commits on session compaction.
 
 ## Configuration
 
@@ -227,7 +257,8 @@ npm test           # build, then run the test suite
 
 ## Status
 
-CLI, config, storage, git commit/push, read/focus commands, and the capture
-skills are implemented and tested. Capture skills invoke `scribe capture`
-instead of hand-editing markdown. Next up: reminder lifecycle, search/context
-retrieval, and capture reliability (hooks or MCP).
+CLI, config, storage, git commit/push, read/focus commands, capture skills, and
+capture reliability (`scribe mcp`, `scribe hook`/`scribe hooks`, OpenCode V2
+plugin, idempotent deduplication, and home-path redaction) are implemented and
+tested. Next up: reminder lifecycle (`done`/`snooze`), cross-month search, and
+Flint merge consumption.

@@ -5,7 +5,7 @@
  * Core library exports. The command-line interface lives in `cli.ts`.
  */
 export { Scribe } from "./scribe";
-export { KnowledgeBase } from "./storage";
+export { KnowledgeBase, redactHomePaths } from "./storage";
 export { Git, isRemoteTarget } from "./git";
 export { rankScribeEntries, composeFocus } from "./merge";
 export {
@@ -19,9 +19,36 @@ export {
   tildifyPath,
 } from "./config";
 export { currentMonth, isDate, isMonth, localDate } from "./date";
+export {
+  MCP_RESOURCES,
+  MCP_TOOLS,
+  runMcpServer,
+  ScribeMcpServer,
+} from "./mcp";
+export {
+  gitHookStatus,
+  inferCategory,
+  installGitHook,
+  installOpenCodeSkill,
+  runAgentStopHook,
+  runPostCommitHook,
+  uninstallGitHook,
+} from "./hooks";
+export {
+  createOpenCodePlugin,
+  SCRIBE_SYSTEM_DIRECTIVE,
+} from "./plugins/opencode";
 
 export type { KnowledgeEntry, ReminderEntry, ScribeEntry } from "./storage";
 export type { GitLike, PushResult } from "./git";
 export type { ScribeOptions, CaptureResult } from "./scribe";
 export type { FocusItem, FocusSourceContribution } from "./merge";
 export type { ConfigOverrides, ScribeConfig } from "./config";
+export type { JsonRpcRequest, JsonRpcResponse } from "./mcp";
+export type {
+  AgentStopPayload,
+  GitHookInstallResult,
+  HookCaptureOutcome,
+  PostCommitHookOptions,
+} from "./hooks";
+export type { OpenCodePluginContext } from "./plugins/opencode";
