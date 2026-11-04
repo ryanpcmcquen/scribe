@@ -51,6 +51,13 @@ a separate workspace repo (default `~/notes/scribe`); `EXAMPLE/` shows the
 format only. The root `.gitignore` guards against accidentally committing
 `knowledge/` or `reminders/` here.
 
+## Privacy
+
+- Never commit absolute home-directory paths (for example, a path containing
+  your username). Use `~/...` or `<workspace>` placeholders.
+- The live knowledge base is kept out of this repo (`/knowledge/` and
+  `/reminders/` are gitignored) and lives in the separate workspace repo.
+
 ## Status
 
 Design / planning. Capture skills drafted, storage + git + orchestrator scaffolded, and end-to-end capture/read runs verified.
