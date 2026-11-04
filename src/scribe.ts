@@ -11,7 +11,7 @@ export interface ScribeOptions {
 
 type ScribeEntry = KnowledgeEntry | ReminderEntry;
 
-const DEFAULT_WORKSPACE_PATH = `${homedir()}/notes/scribe-knowledge`;
+const DEFAULT_WORKSPACE_PATH = `${homedir()}/notes/scribe-journal`;
 
 export class Scribe {
   readonly storage: KnowledgeBase;

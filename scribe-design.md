@@ -55,10 +55,10 @@ Example layout:
 
 ## Storage / git
 
-- Scribe keeps a git repo in a workspace directory (sane default: `~/notes/scribe-knowledge` — Scribe's
-  own folder under `~/notes`; configurable via options); the path is configurable. The knowledge
-  base lives in its own git repo (workspace) — it does not live in Scribe's source repository,
-  which holds Scribe's source/design only.
+- Scribe keeps a git repo in a configurable workspace directory (default:
+  `~/notes/scribe-journal`). The knowledge base lives in that separate Scribe
+  journal repo — it does not live in Scribe's source repository, which holds
+  Scribe's source/design only.
 - Notes are committed automatically; pushed to the configured remote when one exists (no push
   when offline or unconfigured).
 
@@ -119,7 +119,7 @@ Knowledge (`knowledge/2026-11/2026-11-knowledge.md`):
 
     ### 2026-11-03 — Split Scribe storage into per-month knowledge files
 
-    - **Workspace:** ~/notes/scribe-knowledge
+    - **Workspace:** ~/notes/scribe-journal
     - **Agent:** opencode
     - **Category:** decision
 
