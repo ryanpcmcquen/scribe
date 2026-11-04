@@ -1,22 +1,26 @@
 import { Git } from "./git";
 import { KnowledgeBase, KnowledgeEntry, ReminderEntry } from "./storage";
 import { composeFocus, FocusItem, FocusSourceContribution, rankScribeEntries } from "./merge";
+import { homedir } from "os";
 
 export interface ScribeOptions {
-  workspacePath: string;
+  workspacePath?: string;
   repoPath?: string;
   remote?: string;
 }
 
 type ScribeEntry = KnowledgeEntry | ReminderEntry;
 
+const DEFAULT_WORKSPACE_PATH = `${homedir()}/notes/scribe`;
+
 export class Scribe {
   readonly storage: KnowledgeBase;
   readonly git: Git;
 
   constructor(options: ScribeOptions) {
-    this.storage = new KnowledgeBase(options.workspacePath);
-    this.git = new Git(options.repoPath ?? options.workspacePath, options.remote);
+    const workspacePath = options.workspacePath ?? DEFAULT_WORKSPACE_PATH;
+    this.storage = new KnowledgeBase(workspacePath);
+    this.git = new Git(options.repoPath ?? workspacePath, options.remote);
   }
 
   /**

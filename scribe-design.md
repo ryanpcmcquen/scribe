@@ -55,9 +55,10 @@ Example layout:
 
 ## Storage / git
 
-- Scribe keeps a git repo in a workspace directory; the path is configurable (sane default).
-- The knowledge base lives in its own git repo (workspace) — it does not live in Scribe's source
-  repository, which holds Scribe's source/design only.
+- Scribe keeps a git repo in a workspace directory (sane default: `~/notes/scribe` — Scribe's
+  own folder under `~/notes`; configurable via options); the path is configurable. The knowledge
+  base lives in its own git repo (workspace) — it does not live in Scribe's source repository,
+  which holds Scribe's source/design only.
 - Notes are committed automatically; pushed to the configured remote when one exists (no push
   when offline or unconfigured).
 

@@ -1,0 +1,6 @@
+# The live Scribe knowledge base lives in its own workspace repo (default:
+# ~/notes/scribe), never in this source repository.
+/knowledge/
+/reminders/
+
+# Example content is intentionally tracked under EXAMPLE/.

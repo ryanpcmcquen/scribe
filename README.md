@@ -24,14 +24,11 @@ Scribe is a *companion*: it should feel like a faithful, dependable companion th
 
 ```text
 scribe/
+  EXAMPLE/
+    knowledge/2026-11/2026-11-knowledge.md
+    reminders/2026-11/2026-11-reminders.md
   scribe-design.md
   scribe_logo.jpeg
-  knowledge/
-    2026-11/
-      2026-11-knowledge.md
-  reminders/
-    2026-11/
-      2026-11-reminders.md
   skills/
     opencode/scribe-capture.md
     claude-code/scribe-capture.md
@@ -43,8 +40,16 @@ scribe/
     scribe.ts
     storage/
     git/
-    scripts/
+  scripts/
+    e2e-capture-session.ts
+    e2e-read.ts
+    e2e-merge.ts
 ```
+
+Scribe's live knowledge base does **not** live in this source repo. It lives in
+a separate workspace repo (default `~/notes/scribe`); `EXAMPLE/` shows the
+format only. The root `.gitignore` guards against accidentally committing
+`knowledge/` or `reminders/` here.
 
 ## Status
 

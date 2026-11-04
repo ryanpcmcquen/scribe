@@ -3,8 +3,7 @@ import { KnowledgeEntry } from "../src/storage";
 
 async function main(): Promise<void> {
   const scribe = new Scribe({
-    workspacePath: process.cwd(),
-    repoPath: process.cwd(),
+    workspacePath: process.env.SCRIBE_WORKSPACE,
   });
 
   const entry: KnowledgeEntry = {
