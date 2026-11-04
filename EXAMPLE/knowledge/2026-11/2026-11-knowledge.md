@@ -2,7 +2,7 @@
 
 ### 2026-11-03 — Split Scribe storage into per-month knowledge files
 
-- **Workspace:** ~/notes/scribe
+- **Workspace:** ~/notes/scribe-knowledge
 - **Agent:** opencode
 - **Category:** decision
 

@@ -47,7 +47,7 @@ scribe/
 ```
 
 Scribe's live knowledge base does **not** live in this source repo. It lives in
-a separate workspace repo (default `~/notes/scribe`); `EXAMPLE/` shows the
+a separate workspace repo (default `~/notes/scribe-knowledge`); `EXAMPLE/` shows the
 format only. The root `.gitignore` guards against accidentally committing
 `knowledge/` or `reminders/` here.
 

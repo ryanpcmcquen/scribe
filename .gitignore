@@ -1,5 +1,5 @@
 # The live Scribe knowledge base lives in its own workspace repo (default:
-# ~/notes/scribe), never in this source repository.
+# ~/notes/scribe-knowledge), never in this source repository.
 /knowledge/
 /reminders/
 
