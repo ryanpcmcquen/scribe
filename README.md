@@ -66,8 +66,10 @@ Commands:
   init       Initialize the journal, config, and optional git repo
   capture    Capture a knowledge entry or reminder
   read       Read knowledge entries
-  reminders  Read reminders
-  focus      Rank knowledge entries for a focus list
+  reminders  Read or update reminders (done, snooze, reopen)
+  focus      Rank knowledge entries and pending reminders for a focus list
+  search     Search across months over knowledge entries and reminders
+  context    Build a compact context pack for a workspace or query
   mcp        Start the Model Context Protocol (MCP) server on stdio
   hook       Run an automatic capture hook (post-commit, agent-stop)
   hooks      Install, uninstall, or check git hooks and agent skills
@@ -124,6 +126,36 @@ scribe capture \
   --priority p1 \
   --context "Only reading exists today." \
   --action "Add pending/done/snooze."
+```
+
+Manage reminder lifecycle (`done`, `snooze`, `reopen`) and filter by status:
+
+```bash
+scribe reminders --pending
+scribe reminders snooze "Implement reminder lifecycle" --until 2026-11-10
+scribe reminders reopen "Implement reminder lifecycle"
+scribe reminders done "Implement reminder lifecycle"
+```
+
+Active pending reminders (including snoozed reminders whose snooze date has
+arrived) enter `scribe focus` ranked by priority (`p1` → score `4`, `p2` → `3`,
+`p3` → `2`), while `done` and future-`snoozed` reminders are excluded.
+
+### Search & Context Retrieval
+
+Search across all months over both knowledge entries and reminders:
+
+```bash
+scribe search "WAL concurrency"
+scribe search --repo "$PWD" --category decision --json
+```
+
+Retrieve a compact, high-signal context pack (pending reminders, key decisions,
+findings, and recent work) for an agent or human:
+
+```bash
+scribe context --repo "$PWD"
+scribe context --repo "$PWD" --query "storage layout" --json
 ```
 
 Capture options:
@@ -257,8 +289,8 @@ npm test           # build, then run the test suite
 
 ## Status
 
-CLI, config, storage, git commit/push, read/focus commands, capture skills, and
-capture reliability (`scribe mcp`, `scribe hook`/`scribe hooks`, OpenCode V2
-plugin, idempotent deduplication, and home-path redaction) are implemented and
-tested. Next up: reminder lifecycle (`done`/`snooze`), cross-month search, and
-Flint merge consumption.
+CLI, config, storage, git commit/push, reminder lifecycle (`done`/`snooze`/`reopen`),
+cross-month search and context retrieval (`scribe search`, `scribe context`),
+capture skills, and capture reliability (`scribe mcp`, `scribe hook`/`scribe hooks`,
+OpenCode V2 plugin, idempotent deduplication, and home-path redaction) are
+implemented and tested.

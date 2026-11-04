@@ -186,7 +186,7 @@ test("createOpenCodePlugin registers tools and injects context directive", async
     },
   });
 
-  assert.equal(registeredTools.length, 4);
+  assert.equal(registeredTools.length, 6);
   const system = [{ type: "text", text: "Base instructions." }];
   await sessionHooks.context({ sessionID: "ses_1", system });
   await sessionHooks.context({ sessionID: "ses_1", system });

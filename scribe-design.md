@@ -1,8 +1,7 @@
 # Scribe — Design Document
 
-> Status: implemented core + capture reliability. CLI, config, storage, git, read/focus,
-> stdio MCP server, git/agent hooks, OpenCode V2 plugin, tests, and capture skills updated on
-> 2026-11-04.
+> Status: implemented core + capture reliability + reminder lifecycle + search/context + Flint merge.
+> Updated on 2026-11-04.
 
 ## Purpose
 
@@ -46,9 +45,14 @@ Scribe ships a dependency-free Node CLI (`src/cli.ts`):
     scribe init
     scribe capture --title <title> --category <category> --body <markdown>
     scribe capture --stdin          # JSON entry from stdin
-    scribe read [--month YYYY-MM] [--all] [--json]
-    scribe reminders [--month YYYY-MM] [--all] [--json]
+    scribe read [--month YYYY-MM] [--all] [--repo <path>] [--json]
+    scribe reminders [done|snooze|reopen <query>] [--status pending|done|snoozed|all] [--pending] [--json]
     scribe focus [--month YYYY-MM] [--all] [--json]
+    scribe search [<query>] [--repo <path>] [--category <cat>] [--status <status>] [--limit <N>] [--json]
+    scribe context [--repo <path>] [--query <text>] [--limit <N>] [--json]
+    scribe mcp
+    scribe hook <post-commit|agent-stop> [--repo <path>] [--stdin] [--json]
+    scribe hooks <install|uninstall|status> [--git] [--repo <path>] [--skills] [--json]
     scribe doctor [--json]
     scribe config [--json]
 

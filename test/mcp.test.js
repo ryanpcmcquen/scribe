@@ -31,7 +31,14 @@ test("ScribeMcpServer lists tools, captures entries, and reads resources", async
   });
   assert.deepEqual(
     toolsRes.result.tools.map((tool) => tool.name),
-    ["scribe_capture", "scribe_read", "scribe_reminders", "scribe_focus"],
+    [
+      "scribe_capture",
+      "scribe_read",
+      "scribe_reminders",
+      "scribe_focus",
+      "scribe_search",
+      "scribe_context",
+    ],
   );
 
   const captureRes = await server.handleRequest({
@@ -104,5 +111,5 @@ test("scribe mcp CLI handles both newline-delimited and Content-Length JSON-RPC"
   const jsonPart = framedResult.stdout.split("\r\n\r\n")[1];
   const parsed = JSON.parse(jsonPart);
   assert.equal(parsed.id, 2);
-  assert.equal(parsed.result.tools.length, 4);
+  assert.equal(parsed.result.tools.length, 6);
 });

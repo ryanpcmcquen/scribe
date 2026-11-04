@@ -5,9 +5,15 @@
  * Core library exports. The command-line interface lives in `cli.ts`.
  */
 export { Scribe } from "./scribe";
-export { KnowledgeBase, redactHomePaths } from "./storage";
+export {
+  effectiveReminderStatus,
+  isReminderActive,
+  KnowledgeBase,
+  redactHomePaths,
+} from "./storage";
 export { Git, isRemoteTarget } from "./git";
-export { rankScribeEntries, composeFocus } from "./merge";
+export { rankReminders, rankScribeEntries, composeFocus } from "./merge";
+export { buildContextPack, searchKnowledgeBase } from "./search";
 export {
   DEFAULT_AGENT,
   DEFAULT_WORKSPACE,
@@ -39,10 +45,26 @@ export {
   SCRIBE_SYSTEM_DIRECTIVE,
 } from "./plugins/opencode";
 
-export type { KnowledgeEntry, ReminderEntry, ScribeEntry } from "./storage";
+export type {
+  KnowledgeEntry,
+  ReminderEntry,
+  ReminderStatus,
+  ReminderUpdateInput,
+  ScribeEntry,
+} from "./storage";
 export type { GitLike, PushResult } from "./git";
-export type { ScribeOptions, CaptureResult } from "./scribe";
+export type {
+  ScribeOptions,
+  CaptureResult,
+  ReminderUpdateResult,
+} from "./scribe";
 export type { FocusItem, FocusSourceContribution } from "./merge";
+export type {
+  ContextOptions,
+  ContextPack,
+  SearchOptions,
+  SearchResultItem,
+} from "./search";
 export type { ConfigOverrides, ScribeConfig } from "./config";
 export type { JsonRpcRequest, JsonRpcResponse } from "./mcp";
 export type {

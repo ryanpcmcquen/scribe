@@ -8,7 +8,7 @@ import {
 } from "fs";
 import { homedir } from "os";
 import { dirname } from "path";
-import { currentMonth } from "../date";
+import { currentMonth, isDate, localDate } from "../date";
 
 /**
  * Replace any occurrence of the current user's home directory path with `~`
@@ -31,12 +31,55 @@ export interface KnowledgeEntry {
   body: string;
 }
 
+export type ReminderStatus = "pending" | "done" | "snoozed";
+
 export interface ReminderEntry {
   date: string; // YYYY-MM-DD
   title: string;
   priority: "p1" | "p2" | "p3";
   context: string;
   action: string;
+  status?: ReminderStatus;
+  snoozedUntil?: string; // YYYY-MM-DD
+  completedAt?: string; // YYYY-MM-DD
+}
+
+export interface ReminderUpdateInput {
+  status: ReminderStatus;
+  snoozedUntil?: string;
+  completedAt?: string;
+  month?: string;
+}
+
+const PRIORITY_ORDER: Record<ReminderEntry["priority"], number> = {
+  p1: 0,
+  p2: 1,
+  p3: 2,
+};
+
+/**
+ * Resolve the effective status of a reminder as of `asOfDate` (YYYY-MM-DD).
+ * A snoozed reminder whose `snoozedUntil` date has arrived becomes `pending` again.
+ */
+export function effectiveReminderStatus(
+  entry: ReminderEntry,
+  asOfDate: string = localDate(),
+): ReminderStatus {
+  if (entry.status === "done") return "done";
+  if (entry.status === "snoozed") {
+    if (entry.snoozedUntil && entry.snoozedUntil <= asOfDate) {
+      return "pending";
+    }
+    return "snoozed";
+  }
+  return "pending";
+}
+
+export function isReminderActive(
+  entry: ReminderEntry,
+  asOfDate: string = localDate(),
+): boolean {
+  return effectiveReminderStatus(entry, asOfDate) === "pending";
 }
 
 export type ScribeEntry = KnowledgeEntry | ReminderEntry;
@@ -126,13 +169,36 @@ export class KnowledgeBase {
     return filePath;
   }
 
+  private formatReminderBlock(entry: ReminderEntry): string {
+    const sanitized = this.sanitizeReminderEntry(entry);
+    const metaLines: string[] = [`- **Priority:** ${sanitized.priority}`];
+    if (sanitized.status) {
+      metaLines.push(`- **Status:** ${sanitized.status}`);
+    }
+    if (sanitized.snoozedUntil) {
+      metaLines.push(`- **Snoozed Until:** ${sanitized.snoozedUntil}`);
+    }
+    if (sanitized.completedAt) {
+      metaLines.push(`- **Completed:** ${sanitized.completedAt}`);
+    }
+    metaLines.push(`- **Context:** ${sanitized.context}`);
+    return `\n### ${sanitized.date} — ${sanitized.title}\n\n${metaLines.join("\n")}\n\n${sanitized.action}\n`;
+  }
+
+  private writeRemindersForMonth(month: string, entries: ReminderEntry[]): string {
+    const filePath = this.remindersPath(month);
+    mkdirSync(dirname(filePath), { recursive: true });
+    const blocks = entries.map((entry) => this.formatReminderBlock(entry)).join("");
+    writeFileSync(filePath, `## ${month}\n${blocks}`);
+    return filePath;
+  }
+
   appendReminder(entry: ReminderEntry): string {
     const sanitized = this.sanitizeReminderEntry(entry);
     const month = sanitized.date.slice(0, 7); // YYYY-MM
     const filePath = this.remindersPath(month);
     this.ensureFile(filePath, month);
-    const entryBlock = `\n### ${sanitized.date} — ${sanitized.title}\n\n- **Priority:** ${sanitized.priority}\n- **Context:** ${sanitized.context}\n\n${sanitized.action}\n`;
-    appendFileSync(filePath, entryBlock);
+    appendFileSync(filePath, this.formatReminderBlock(sanitized));
     return filePath;
   }
 
@@ -213,16 +279,40 @@ export class KnowledgeBase {
         }
       }
 
+      const rawStatus = fields["Status"];
+      const status: ReminderStatus | undefined =
+        rawStatus === "pending" || rawStatus === "done" || rawStatus === "snoozed"
+          ? rawStatus
+          : undefined;
+      const snoozedUntil = fields["Snoozed Until"] || undefined;
+      const completedAt = fields["Completed"] || undefined;
+
       entries.push({
         date,
         title,
         priority: (fields["Priority"] ?? "p2") as ReminderEntry["priority"],
         context: fields["Context"] ?? "",
         action: actionLines.join("\n").trim(),
+        ...(status ? { status } : {}),
+        ...(snoozedUntil ? { snoozedUntil } : {}),
+        ...(completedAt ? { completedAt } : {}),
       });
     }
 
     return entries;
+  }
+
+  readActiveReminders(
+    month: string = currentMonth(),
+    asOfDate: string = localDate(),
+  ): ReminderEntry[] {
+    return this.readReminders(month)
+      .filter((entry) => isReminderActive(entry, asOfDate))
+      .sort(
+        (a, b) =>
+          (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9) ||
+          b.date.localeCompare(a.date),
+      );
   }
 
   readAllKnowledge(): KnowledgeEntry[] {
@@ -231,6 +321,75 @@ export class KnowledgeBase {
 
   readAllReminders(): ReminderEntry[] {
     return this.listMonths("reminders").flatMap((month) => this.readReminders(month));
+  }
+
+  readAllActiveReminders(asOfDate: string = localDate()): ReminderEntry[] {
+    return this.readAllReminders()
+      .filter((entry) => isReminderActive(entry, asOfDate))
+      .sort(
+        (a, b) =>
+          (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9) ||
+          b.date.localeCompare(a.date),
+      );
+  }
+
+  updateReminderStatus(
+    query: string,
+    input: ReminderUpdateInput,
+  ): { updated: ReminderEntry; path: string; month: string } {
+    const needle = query.trim().toLowerCase();
+    if (!needle) {
+      throw new Error("a reminder title or query is required");
+    }
+
+    if (input.status === "snoozed") {
+      if (!input.snoozedUntil || !isDate(input.snoozedUntil)) {
+        throw new Error(
+          `invalid snooze date "${input.snoozedUntil ?? ""}" (expected YYYY-MM-DD)`,
+        );
+      }
+    }
+
+    const candidateMonths = input.month
+      ? [input.month]
+      : [...this.listMonths("reminders")].reverse();
+
+    for (const month of candidateMonths) {
+      const entries = this.readReminders(month);
+      let index = entries.findIndex(
+        (entry) => entry.title.toLowerCase() === needle,
+      );
+      if (index === -1) {
+        index = entries.findIndex((entry) =>
+          entry.title.toLowerCase().includes(needle),
+        );
+      }
+      if (index === -1) continue;
+
+      const current = entries[index];
+      const updated: ReminderEntry = {
+        date: current.date,
+        title: current.title,
+        priority: current.priority,
+        context: current.context,
+        action: current.action,
+      };
+
+      if (input.status === "done") {
+        updated.status = "done";
+        updated.completedAt = input.completedAt ?? localDate();
+      } else if (input.status === "snoozed") {
+        updated.status = "snoozed";
+        updated.snoozedUntil = input.snoozedUntil;
+      }
+      // For "pending" (reopen), omit status/snoozedUntil/completedAt so it returns to clean pending state.
+
+      entries[index] = updated;
+      const path = this.writeRemindersForMonth(month, entries);
+      return { updated, path, month };
+    }
+
+    throw new Error(`no reminder matching "${query}" found`);
   }
 
   listMonths(kind: EntryKind): string[] {

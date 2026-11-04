@@ -7,7 +7,13 @@ import {
 } from "../config";
 import { currentMonth, isDate, isMonth, localDate } from "../date";
 import { Scribe } from "../scribe";
-import { KnowledgeEntry, ReminderEntry, ScribeEntry } from "../storage";
+import {
+  effectiveReminderStatus,
+  KnowledgeEntry,
+  ReminderEntry,
+  ReminderStatus,
+  ScribeEntry,
+} from "../storage";
 
 export interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -108,10 +114,29 @@ export const MCP_TOOLS = [
   },
   {
     name: "scribe_reminders",
-    description: "Read Scribe reminders for a specific month or across all months.",
+    description:
+      "Read Scribe reminders or update a reminder's lifecycle status (done, snooze, reopen).",
     inputSchema: {
       type: "object",
       properties: {
+        action: {
+          type: "string",
+          enum: ["list", "done", "snooze", "reopen"],
+          description: "Lifecycle action (defaults to 'list').",
+        },
+        title: {
+          type: "string",
+          description: "Reminder title or substring query when action is done, snooze, or reopen.",
+        },
+        until: {
+          type: "string",
+          description: "Snooze date in YYYY-MM-DD format when action is 'snooze'.",
+        },
+        status: {
+          type: "string",
+          enum: ["pending", "done", "snoozed", "all"],
+          description: "Filter listed reminders by effective status.",
+        },
         month: {
           type: "string",
           description: "Month in YYYY-MM format (defaults to current month unless all is true).",
@@ -126,7 +151,8 @@ export const MCP_TOOLS = [
   },
   {
     name: "scribe_focus",
-    description: "Rank Scribe knowledge entries by priority weight for a focus brief.",
+    description:
+      "Rank Scribe knowledge entries and active reminders by priority weight for a focus brief.",
     inputSchema: {
       type: "object",
       properties: {
@@ -137,6 +163,71 @@ export const MCP_TOOLS = [
         all: {
           type: "boolean",
           description: "Rank across all recorded months.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "scribe_search",
+    description:
+      "Search across months over Scribe knowledge entries and reminders by keyword, workspace, category, or status.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search keywords or phrase.",
+        },
+        workspace: {
+          type: "string",
+          description: "Optional workspace path filter.",
+        },
+        category: {
+          type: "string",
+          enum: ["finding", "decision", "work-log"],
+          description: "Optional knowledge category filter.",
+        },
+        status: {
+          type: "string",
+          enum: ["pending", "done", "snoozed", "all"],
+          description: "Optional reminder status filter.",
+        },
+        kind: {
+          type: "string",
+          enum: ["all", "knowledge", "reminders"],
+          description: "Entry kind to search (defaults to 'all').",
+        },
+        month: {
+          type: "string",
+          description: "Optional month filter in YYYY-MM format.",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum results to return (defaults to 20).",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "scribe_context",
+    description:
+      "Retrieve a compact, high-signal Scribe context pack (decisions, findings, recent work, and pending reminders) for a workspace.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspace: {
+          type: "string",
+          description: "Optional workspace path to scope context to.",
+        },
+        query: {
+          type: "string",
+          description: "Optional task query to rank relevant entries.",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum items per section (defaults to 5).",
         },
       },
       additionalProperties: false,
@@ -421,16 +512,52 @@ export class ScribeMcpServer {
         }
 
         case "scribe_reminders": {
-          const all = args.all === true;
+          const action =
+            typeof args.action === "string" && args.action ? args.action : "list";
           const month =
             typeof args.month === "string" && args.month ? args.month : undefined;
           if (month && !isMonth(month)) {
             throw new Error(`invalid month "${month}" (expected YYYY-MM)`);
           }
+
+          if (action === "done" || action === "snooze" || action === "reopen") {
+            const title =
+              typeof args.title === "string" ? args.title.trim() : "";
+            const scribe = this.createScribe(config, false);
+            const outcome =
+              action === "done"
+                ? await scribe.completeReminder(title, { month })
+                : action === "snooze"
+                  ? await scribe.snoozeReminder(
+                      title,
+                      typeof args.until === "string" ? args.until : "",
+                      { month },
+                    )
+                  : await scribe.reopenReminder(title, { month });
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({ ok: true, action, ...outcome }, null, 2),
+                },
+              ],
+            };
+          }
+
+          const all = args.all === true;
+          const statusFilter =
+            typeof args.status === "string" && args.status
+              ? (args.status as ReminderStatus | "all")
+              : undefined;
           const scribe = this.createScribe(config, true);
-          const entries = all
+          let entries = all
             ? scribe.readAllReminders()
             : scribe.readReminders(month);
+          if (statusFilter && statusFilter !== "all") {
+            entries = entries.filter(
+              (entry) => effectiveReminderStatus(entry) === statusFilter,
+            );
+          }
           return {
             content: [
               {
@@ -471,6 +598,68 @@ export class ScribeMcpServer {
                   null,
                   2,
                 ),
+              },
+            ],
+          };
+        }
+
+        case "scribe_search": {
+          const month =
+            typeof args.month === "string" && args.month ? args.month : undefined;
+          if (month && !isMonth(month)) {
+            throw new Error(`invalid month "${month}" (expected YYYY-MM)`);
+          }
+          const scribe = this.createScribe(config, true);
+          const results = scribe.search({
+            query: typeof args.query === "string" ? args.query : undefined,
+            workspace:
+              typeof args.workspace === "string" ? args.workspace : undefined,
+            category:
+              typeof args.category === "string"
+                ? (args.category as KnowledgeEntry["category"])
+                : undefined,
+            status:
+              typeof args.status === "string"
+                ? (args.status as ReminderStatus | "all")
+                : undefined,
+            kind:
+              typeof args.kind === "string"
+                ? (args.kind as "all" | "knowledge" | "reminders")
+                : undefined,
+            month,
+            limit: typeof args.limit === "number" ? args.limit : undefined,
+          });
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    ok: true,
+                    count: results.length,
+                    results,
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+          };
+        }
+
+        case "scribe_context": {
+          const scribe = this.createScribe(config, true);
+          const pack = scribe.context({
+            workspace:
+              typeof args.workspace === "string" ? args.workspace : undefined,
+            query: typeof args.query === "string" ? args.query : undefined,
+            limit: typeof args.limit === "number" ? args.limit : undefined,
+          });
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ ok: true, ...pack }, null, 2),
               },
             ],
           };

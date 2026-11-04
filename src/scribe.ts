@@ -4,14 +4,24 @@ import {
   KnowledgeBase,
   KnowledgeEntry,
   ReminderEntry,
+  ReminderStatus,
   ScribeEntry,
 } from "./storage";
 import {
   composeFocus,
   FocusItem,
   FocusSourceContribution,
+  rankReminders,
   rankScribeEntries,
 } from "./merge";
+import {
+  buildContextPack,
+  ContextOptions,
+  ContextPack,
+  searchKnowledgeBase,
+  SearchOptions,
+  SearchResultItem,
+} from "./search";
 
 export interface ScribeOptions {
   workspacePath?: string;
@@ -29,6 +39,15 @@ export interface CaptureResult {
   pushError?: string;
 }
 
+export interface ReminderUpdateResult {
+  reminder: ReminderEntry;
+  path: string;
+  month: string;
+  committed: boolean;
+  pushed: boolean;
+  pushError?: string;
+}
+
 export class Scribe {
   readonly storage: KnowledgeBase;
   readonly git: Git;
@@ -42,6 +61,30 @@ export class Scribe {
     this.git = new Git(options.repoPath ?? workspacePath, options.remote);
     this.autoCommit = options.autoCommit ?? true;
     this.autoPush = options.autoPush ?? true;
+  }
+
+  private async commitAndPush(message: string): Promise<{
+    committed: boolean;
+    pushed: boolean;
+    pushError?: string;
+  }> {
+    const committed = this.autoCommit
+      ? await this.git.commit(message)
+      : false;
+
+    let pushed = false;
+    let pushError: string | undefined;
+    if (this.autoPush && committed) {
+      const result = await this.git.push();
+      pushed = result.pushed;
+      pushError = result.error;
+    }
+
+    return {
+      committed,
+      pushed,
+      ...(pushError ? { pushError } : {}),
+    };
   }
 
   /**
@@ -67,24 +110,76 @@ export class Scribe {
         ? this.storage.appendKnowledgeEntry(entry)
         : this.storage.appendReminder(entry);
 
-    const committed = this.autoCommit
-      ? await this.git.commit(`Scribe: ${entry.date} — ${entry.title}`)
-      : false;
-
-    let pushed = false;
-    let pushError: string | undefined;
-    if (this.autoPush && committed) {
-      const result = await this.git.push();
-      pushed = result.pushed;
-      pushError = result.error;
-    }
+    const gitOutcome = await this.commitAndPush(
+      `Scribe: ${entry.date} — ${entry.title}`,
+    );
 
     return {
       path,
-      committed,
-      pushed,
-      ...(pushError ? { pushError } : {}),
+      ...gitOutcome,
     };
+  }
+
+  /**
+   * Transition a reminder's status (`done`, `snoozed`, or `pending`), commit, and push.
+   */
+  async updateReminderStatus(
+    query: string,
+    status: ReminderStatus,
+    options: { month?: string; snoozedUntil?: string; completedAt?: string } = {},
+  ): Promise<ReminderUpdateResult> {
+    const { updated, path, month } = this.storage.updateReminderStatus(query, {
+      status,
+      month: options.month,
+      snoozedUntil: options.snoozedUntil,
+      completedAt: options.completedAt,
+    });
+
+    const commitSummary =
+      status === "done"
+        ? `Scribe: mark reminder done — ${updated.title}`
+        : status === "snoozed"
+          ? `Scribe: snooze reminder until ${updated.snoozedUntil} — ${updated.title}`
+          : `Scribe: reopen reminder — ${updated.title}`;
+
+    const gitOutcome = await this.commitAndPush(commitSummary);
+
+    return {
+      reminder: updated,
+      path,
+      month,
+      ...gitOutcome,
+    };
+  }
+
+  async completeReminder(
+    query: string,
+    options: { month?: string; date?: string } = {},
+  ): Promise<ReminderUpdateResult> {
+    return this.updateReminderStatus(query, "done", {
+      month: options.month,
+      completedAt: options.date,
+    });
+  }
+
+  async snoozeReminder(
+    query: string,
+    untilDate: string,
+    options: { month?: string } = {},
+  ): Promise<ReminderUpdateResult> {
+    return this.updateReminderStatus(query, "snoozed", {
+      month: options.month,
+      snoozedUntil: untilDate,
+    });
+  }
+
+  async reopenReminder(
+    query: string,
+    options: { month?: string } = {},
+  ): Promise<ReminderUpdateResult> {
+    return this.updateReminderStatus(query, "pending", {
+      month: options.month,
+    });
   }
 
   /**
@@ -115,15 +210,51 @@ export class Scribe {
     return this.storage.readAllReminders();
   }
 
-  /**
-   * Rank accumulated Scribe knowledge entries for Flint's focus merge.
-   */
-  rank(month?: string): FocusItem[] {
-    return rankScribeEntries(this.storage.readKnowledge(month));
+  readActiveReminders(month?: string, asOfDate?: string): ReminderEntry[] {
+    return this.storage.readActiveReminders(month, asOfDate);
   }
 
-  rankAll(): FocusItem[] {
-    return rankScribeEntries(this.storage.readAllKnowledge());
+  readAllActiveReminders(asOfDate?: string): ReminderEntry[] {
+    return this.storage.readAllActiveReminders(asOfDate);
+  }
+
+  /**
+   * Rank accumulated Scribe knowledge entries and active reminders for Flint's focus merge.
+   */
+  rank(month?: string, asOfDate?: string): FocusItem[] {
+    const knowledgeItems = rankScribeEntries(this.storage.readKnowledge(month));
+    const reminderItems = rankReminders(
+      this.storage.readReminders(month),
+      asOfDate,
+    );
+    return composeFocus(knowledgeItems, [
+      { source: "scribe-reminders", items: reminderItems },
+    ]);
+  }
+
+  rankAll(asOfDate?: string): FocusItem[] {
+    const knowledgeItems = rankScribeEntries(this.storage.readAllKnowledge());
+    const reminderItems = rankReminders(
+      this.storage.readAllReminders(),
+      asOfDate,
+    );
+    return composeFocus(knowledgeItems, [
+      { source: "scribe-reminders", items: reminderItems },
+    ]);
+  }
+
+  /**
+   * Search across months over knowledge entries and reminders.
+   */
+  search(options: SearchOptions = {}): SearchResultItem[] {
+    return searchKnowledgeBase(this.storage, options);
+  }
+
+  /**
+   * Build a compact, high-signal context pack for an agent or human.
+   */
+  context(options: ContextOptions = {}): ContextPack {
+    return buildContextPack(this.storage, options);
   }
 
   /**

@@ -32,7 +32,13 @@ import {
 import { runMcpServer } from "./mcp";
 import { FocusItem } from "./merge";
 import { Scribe } from "./scribe";
-import { KnowledgeEntry, ReminderEntry, ScribeEntry } from "./storage";
+import {
+  effectiveReminderStatus,
+  KnowledgeEntry,
+  ReminderEntry,
+  ReminderStatus,
+  ScribeEntry,
+} from "./storage";
 
 type FlagValue = string | boolean;
 
@@ -65,6 +71,7 @@ const BOOLEAN_FLAGS = new Set([
   "no-commit",
   "no-git",
   "no-push",
+  "pending",
   "skills",
   "stdin",
   "version",
@@ -298,7 +305,14 @@ function printReminderEntries(entries: ReminderEntry[]): void {
   }
 
   for (const entry of entries) {
-    console.log(`\n${entry.date} — ${entry.title} [${entry.priority}]`);
+    const status = effectiveReminderStatus(entry);
+    const badge =
+      status === "done"
+        ? " [done]"
+        : status === "snoozed"
+          ? ` [snoozed until ${entry.snoozedUntil ?? "?"}]`
+          : "";
+    console.log(`\n${entry.date} — ${entry.title} [${entry.priority}]${badge}`);
     if (entry.context) console.log(`  context: ${entry.context}`);
     if (entry.action) console.log(`  action: ${entry.action.replace(/\n/g, "\n  ")}`);
   }
@@ -486,10 +500,14 @@ function commandRead(args: ParsedArgs, config: ScribeConfig): number {
   return 0;
 }
 
-function commandReminders(args: ParsedArgs, config: ScribeConfig): number {
+async function commandReminders(
+  args: ParsedArgs,
+  config: ScribeConfig,
+): Promise<number> {
   const json = flagBool(args.flags, "json");
   const all = flagBool(args.flags, "all");
   const month = flagString(args.flags, "month");
+  const subcommand = args.positionals[0];
 
   if (all && month) {
     throw new Error("use either --month or --all, not both");
@@ -498,17 +516,173 @@ function commandReminders(args: ParsedArgs, config: ScribeConfig): number {
     throw new Error(`invalid month "${month}" (expected YYYY-MM)`);
   }
 
+  if (
+    subcommand === "done" ||
+    subcommand === "snooze" ||
+    subcommand === "reopen"
+  ) {
+    const query = flagString(args.flags, "title") ?? args.positionals[1] ?? "";
+    const scribe = new Scribe({
+      workspacePath: config.workspace,
+      remote: config.remote,
+      autoCommit: config.autoCommit,
+      autoPush: config.autoPush,
+    });
+
+    const outcome =
+      subcommand === "done"
+        ? await scribe.completeReminder(query, {
+            month,
+            date: flagString(args.flags, "date"),
+          })
+        : subcommand === "snooze"
+          ? await scribe.snoozeReminder(
+              query,
+              flagString(args.flags, "until") ??
+                flagString(args.flags, "date") ??
+                args.positionals[2] ??
+                "",
+              { month },
+            )
+          : await scribe.reopenReminder(query, { month });
+
+    if (json) {
+      printJson({ ok: true, action: subcommand, ...outcome });
+    } else {
+      console.log(`Reminder ${subcommand}: ${outcome.reminder.title}`);
+      console.log(`  ${outcome.path}`);
+    }
+    return 0;
+  }
+
+  const statusFlag = flagString(args.flags, "status");
+  const pendingOnly = flagBool(args.flags, "pending");
+  const statusFilter: ReminderStatus | "all" | undefined = pendingOnly
+    ? "pending"
+    : (statusFlag as ReminderStatus | "all" | undefined);
+
+  if (
+    statusFilter &&
+    !["pending", "done", "snoozed", "all"].includes(statusFilter)
+  ) {
+    throw new Error(
+      `invalid reminder status "${statusFilter}" (expected pending, done, snoozed, or all)`,
+    );
+  }
+
   const scribe = new Scribe({
     workspacePath: config.workspace,
     autoCommit: false,
     autoPush: false,
   });
-  const entries = all ? scribe.readAllReminders() : scribe.readReminders(month);
+  let entries = all ? scribe.readAllReminders() : scribe.readReminders(month);
+  if (statusFilter && statusFilter !== "all") {
+    entries = entries.filter(
+      (entry) => effectiveReminderStatus(entry) === statusFilter,
+    );
+  }
 
   if (json) {
     printJson({ ok: true, month: all ? null : month ?? currentMonth(), entries });
   } else {
     printReminderEntries(entries);
+  }
+
+  return 0;
+}
+
+function commandSearch(args: ParsedArgs, config: ScribeConfig): number {
+  const json = flagBool(args.flags, "json");
+  const query =
+    flagString(args.flags, "query") ?? args.positionals.join(" ").trim();
+  const month = flagString(args.flags, "month");
+  const workspace = flagString(args.flags, "repo");
+  const category = flagString(args.flags, "category") as
+    | KnowledgeEntry["category"]
+    | undefined;
+  const status = flagString(args.flags, "status") as
+    | ReminderStatus
+    | "all"
+    | undefined;
+  const kind = flagString(args.flags, "kind") as
+    | "all"
+    | "knowledge"
+    | "reminders"
+    | undefined;
+  const limitRaw = flagString(args.flags, "limit");
+  const limit = limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : undefined;
+
+  if (month && !isMonth(month)) {
+    throw new Error(`invalid month "${month}" (expected YYYY-MM)`);
+  }
+  if (category && !["finding", "decision", "work-log"].includes(category)) {
+    throw new Error(
+      `invalid category "${category}" (expected finding, decision, or work-log)`,
+    );
+  }
+  if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
+    throw new Error(`invalid limit "${limitRaw}" (expected positive integer)`);
+  }
+
+  const scribe = new Scribe({
+    workspacePath: config.workspace,
+    autoCommit: false,
+    autoPush: false,
+  });
+  const results = scribe.search({
+    query,
+    workspace,
+    category,
+    status,
+    kind,
+    month,
+    limit,
+  });
+
+  if (json) {
+    printJson({ ok: true, query: query || null, count: results.length, results });
+  } else if (results.length === 0) {
+    console.log("No matching Scribe entries.");
+  } else {
+    for (const item of results) {
+      const label =
+        item.kind === "knowledge"
+          ? `${item.category}${item.workspace ? ` · ${item.workspace}` : ""}`
+          : `reminder ${item.priority} · ${item.status}`;
+      console.log(`\n${item.score}  ${item.date} — ${item.title} [${label}]`);
+      if (item.snippet) {
+        console.log(`   ${item.snippet}`);
+      }
+    }
+  }
+
+  return 0;
+}
+
+function commandContext(args: ParsedArgs, config: ScribeConfig): number {
+  const json = flagBool(args.flags, "json");
+  const workspace = flagString(args.flags, "repo");
+  const query =
+    flagString(args.flags, "query") ??
+    (args.positionals.length > 0 ? args.positionals.join(" ").trim() : undefined);
+  const limitRaw = flagString(args.flags, "limit");
+  const limit = limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : undefined;
+
+  if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
+    throw new Error(`invalid limit "${limitRaw}" (expected positive integer)`);
+  }
+
+  const scribe = new Scribe({
+    workspacePath: config.workspace,
+    autoCommit: false,
+    autoPush: false,
+  });
+  const pack = scribe.context({ workspace, query, limit });
+
+  if (json) {
+    printJson({ ok: true, ...pack });
+  } else {
+    process.stdout.write(pack.markdown);
   }
 
   return 0;
@@ -778,8 +952,10 @@ Commands:
   init       Initialize the journal, config, and optional git repo
   capture    Capture a knowledge entry or reminder
   read       Read knowledge entries
-  reminders  Read reminders
-  focus      Rank knowledge entries for a focus list
+  reminders  Read or update reminders (done, snooze, reopen)
+  focus      Rank knowledge entries and pending reminders for a focus list
+  search     Search across months over knowledge entries and reminders
+  context    Build a compact context pack for a workspace or query
   mcp        Start the Model Context Protocol (MCP) server on stdio
   hook       Run an automatic capture hook (post-commit, agent-stop)
   hooks      Install, uninstall, or check git hooks and agent skills
@@ -846,6 +1022,10 @@ export async function main(argv: string[]): Promise<number> {
       return commandReminders(args, config);
     case "focus":
       return commandFocus(args, config);
+    case "search":
+      return commandSearch(args, config);
+    case "context":
+      return commandContext(args, config);
     case "mcp":
       return runMcpServer({ ...configOverrides(args), configPath });
     case "hook":
