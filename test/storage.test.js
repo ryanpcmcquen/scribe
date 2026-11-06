@@ -141,9 +141,12 @@ test("missing months read as empty arrays", (t) => {
 });
 
 test("redactHomePaths scrubs home directory references across entry fields", (t) => {
-  const fakeHome = "/home/alice";
+  const fakeHome = "/tmp/fake-home-alice";
   assert.equal(
-    redactHomePaths("Checked /home/alice/code/app and /home/alice.", fakeHome),
+    redactHomePaths(
+      "Checked /tmp/fake-home-alice/code/app and /tmp/fake-home-alice.",
+      fakeHome,
+    ),
     "Checked ~/code/app and ~.",
   );
 
