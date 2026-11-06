@@ -224,6 +224,70 @@ test("capture pushes to a configured remote path", (t) => {
   assert.match(remoteLog.stdout, /Scribe: .* Pushed entry/);
 });
 
+test("capture auto-rebases on non-fast-forward push and scribe sync pulls remote commits", (t) => {
+  if (!hasGit) return t.skip("git is not installed");
+  const { dir, env, workspace: workspaceA } = initWorkspace(t);
+  const bare = `${dir}/remote.git`;
+  const workspaceB = `${dir}/journal-b`;
+  const envA = { ...env, SCRIBE_REMOTE: bare };
+  const envB = {
+    SCRIBE_CONFIG: `${dir}/config-b.json`,
+    SCRIBE_WORKSPACE: workspaceB,
+    SCRIBE_REMOTE: bare,
+  };
+
+  const initBare = spawnSync("git", ["init", "--bare", "-b", "main", bare], {
+    encoding: "utf8",
+  });
+  assert.equal(initBare.status, 0, initBare.stderr);
+
+  const firstPush = runCli(
+    ["capture", "--date", "2026-10-15", "--title", "Initial commit from A", "--json"],
+    { env: envA },
+  );
+  assert.equal(firstPush.status, 0, firstPush.stderr);
+  assert.equal(parseJson(firstPush).pushed, true);
+
+  const cloneB = spawnSync("git", ["clone", bare, workspaceB], {
+    encoding: "utf8",
+  });
+  assert.equal(cloneB.status, 0, cloneB.stderr);
+
+  const secondFromA = runCli(
+    ["capture", "--date", "2026-10-16", "--title", "Ahead commit from A", "--json"],
+    { env: envA },
+  );
+  assert.equal(secondFromA.status, 0, secondFromA.stderr);
+  assert.equal(parseJson(secondFromA).pushed, true);
+
+  const concurrentFromB = runCli(
+    ["capture", "--date", "2026-11-01", "--title", "Concurrent commit from B", "--json"],
+    { env: envB },
+  );
+  assert.equal(concurrentFromB.status, 0, concurrentFromB.stderr);
+  const outB = parseJson(concurrentFromB);
+  assert.equal(outB.committed, true);
+  assert.equal(outB.pushed, true);
+  assert.equal(outB.rebased, true);
+
+  const syncA = runCli(["sync", "--json"], { env: envA });
+  assert.equal(syncA.status, 0, syncA.stderr);
+  const syncOut = parseJson(syncA);
+  assert.equal(syncOut.ok, true);
+  assert.equal(syncOut.pulled, true);
+  assert.equal(syncOut.rebased, true);
+
+  const allOnA = parseJson(runCli(["read", "--all", "--json"], { env: envA }));
+  assert.deepEqual(
+    allOnA.entries.map((entry) => entry.title),
+    [
+      "Initial commit from A",
+      "Ahead commit from A",
+      "Concurrent commit from B",
+    ],
+  );
+});
+
 test("doctor treats a configured remote path as configured", (t) => {
   if (!hasGit) return t.skip("git is not installed");
   const { dir, env } = initWorkspace(t);

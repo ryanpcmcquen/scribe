@@ -3,6 +3,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
+const { recencyDecay } = require("../dist/merge/index.js");
 const { parseJson, runCli, tempDir } = require("./helpers");
 
 test("scribe focus merges git, mcp, session, and scribe sources with precedence and bullet output", (t) => {
@@ -98,4 +99,72 @@ test("scribe focus merges git, mcp, session, and scribe sources with precedence 
   });
   assert.equal(bulletCli.status, 0, bulletCli.stderr);
   assert.match(bulletCli.stdout, /^- flint: Finish uncommitted changes on main\n/m);
+});
+
+test("recencyDecay and scribe focus apply age-based score decay while keeping reminders steady", (t) => {
+  assert.equal(recencyDecay("2026-11-25", "2026-11-25"), 0);
+  assert.equal(recencyDecay("2026-11-23", "2026-11-25"), 0.25);
+  assert.equal(recencyDecay("2026-11-19", "2026-11-25"), 0.5);
+  assert.equal(recencyDecay("2026-11-13", "2026-11-25"), 1.0);
+  assert.equal(recencyDecay("2026-11-01", "2026-11-25"), 1.25);
+  assert.equal(recencyDecay("2026-10-01", "2026-11-25"), 1.5);
+
+  const dir = tempDir(t);
+  const workspace = `${dir}/journal`;
+  const env = {
+    SCRIBE_CONFIG: `${dir}/config.json`,
+    SCRIBE_WORKSPACE: workspace,
+    SCRIBE_AUTO_COMMIT: "false",
+    SCRIBE_AUTO_PUSH: "false",
+  };
+
+  runCli(["init", "--workspace", workspace, "--no-git", "--json"], { env });
+
+  runCli(
+    [
+      "capture",
+      "--date",
+      "2026-11-01",
+      "--title",
+      "Stale early-month decision",
+      "--category",
+      "decision",
+      "--repo",
+      `${dir}/scribe`,
+      "--body",
+      "Older decision.",
+      "--json",
+    ],
+    { env },
+  );
+
+  runCli(
+    [
+      "capture",
+      "--date",
+      "2026-11-25",
+      "--title",
+      "Fresh today finding",
+      "--category",
+      "finding",
+      "--repo",
+      `${dir}/scribe`,
+      "--body",
+      "New finding today.",
+      "--json",
+    ],
+    { env },
+  );
+
+  const focus = parseJson(
+    runCli(["focus", "--month", "2026-11", "--date", "2026-11-25", "--json"], {
+      env,
+    }),
+  );
+  assert.equal(focus.ok, true);
+  assert.equal(focus.items.length, 2);
+  assert.equal(focus.items[0].entry.title, "Fresh today finding");
+  assert.equal(focus.items[0].score, 2);
+  assert.equal(focus.items[1].entry.title, "Stale early-month decision");
+  assert.equal(focus.items[1].score, 1.75);
 });

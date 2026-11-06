@@ -51,6 +51,7 @@ Scribe ships a dependency-free Node CLI (`src/cli.ts`):
     scribe focus [--month YYYY-MM] [--all] [--repo <path>] [--limit <N>] [--stdin] [--bullets] [--json]
     scribe search [<query>] [--repo <path>] [--category <cat>] [--status <status>] [--limit <N>] [--json]
     scribe context [--repo <path>] [--query <text>] [--limit <N>] [--json]
+    scribe sync [--message <msg>] [--no-commit] [--no-push] [--json]
     scribe mcp
     scribe hook <post-commit|agent-stop> [--repo <path>] [--stdin] [--json]
     scribe hooks <install|uninstall|status> [--git] [--repo <path>] [--skills] [--json]

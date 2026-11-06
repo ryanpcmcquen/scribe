@@ -702,6 +702,7 @@ async function commandFocus(
   const bulletsOnly = flagBool(args.flags, "bullets");
   const useStdin = flagBool(args.flags, "stdin");
   const month = flagString(args.flags, "month");
+  const asOfDate = flagString(args.flags, "date");
   const workspace = flagString(args.flags, "repo");
   const limitRaw = flagString(args.flags, "limit");
   const limit = limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : undefined;
@@ -711,6 +712,9 @@ async function commandFocus(
   }
   if (month && !isMonth(month)) {
     throw new Error(`invalid month "${month}" (expected YYYY-MM)`);
+  }
+  if (asOfDate && !isDate(asOfDate)) {
+    throw new Error(`invalid date "${asOfDate}" (expected YYYY-MM-DD)`);
   }
   if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
     throw new Error(`invalid limit "${limitRaw}" (expected positive integer)`);
@@ -743,6 +747,7 @@ async function commandFocus(
     all,
     workspace,
     limit,
+    asOfDate,
   });
 
   if (json) {
@@ -841,6 +846,41 @@ function commandConfig(
     printConfig(config, configPath);
   }
   return 0;
+}
+
+async function commandSync(
+  args: ParsedArgs,
+  config: ScribeConfig,
+): Promise<number> {
+  const json = flagBool(args.flags, "json");
+  const message = flagString(args.flags, "message");
+  const scribe = new Scribe({
+    workspacePath: config.workspace,
+    remote: config.remote,
+    autoCommit: config.autoCommit,
+    autoPush: config.autoPush,
+  });
+
+  const outcome = await scribe.sync(message);
+  const ok = !outcome.error;
+
+  if (json) {
+    printJson({
+      ok,
+      workspace: config.workspace,
+      ...outcome,
+    });
+  } else {
+    console.log(`Synced journal: ${tildifyPath(config.workspace)}`);
+    console.log(`  committed: ${outcome.committed ? "yes" : "no"}`);
+    console.log(`  pulled: ${outcome.pulled ? "yes" : "no"}`);
+    console.log(`  rebased: ${outcome.rebased ? "yes" : "no"}`);
+    console.log(
+      `  pushed: ${outcome.pushed ? "yes" : "no"}${outcome.error ? ` (${outcome.error})` : ""}`,
+    );
+  }
+
+  return ok ? 0 : 1;
 }
 
 async function commandHook(
@@ -1003,6 +1043,7 @@ Commands:
   focus      Rank knowledge entries and pending reminders for a focus list
   search     Search across months over knowledge entries and reminders
   context    Build a compact context pack for a workspace or query
+  sync       Sync journal repo (commit local changes, pull --rebase, push)
   mcp        Start the Model Context Protocol (MCP) server on stdio
   hook       Run an automatic capture hook (post-commit, agent-stop)
   hooks      Install, uninstall, or check git hooks and agent skills
@@ -1073,6 +1114,8 @@ export async function main(argv: string[]): Promise<number> {
       return commandSearch(args, config);
     case "context":
       return commandContext(args, config);
+    case "sync":
+      return commandSync(args, config);
     case "mcp":
       return runMcpServer({ ...configOverrides(args), configPath });
     case "hook":

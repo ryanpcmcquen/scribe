@@ -19,6 +19,21 @@ export function isRemoteTarget(value: string): boolean {
 
 export interface PushResult {
   pushed: boolean;
+  rebased?: boolean;
+  error?: string;
+}
+
+export interface PullResult {
+  pulled: boolean;
+  rebased?: boolean;
+  error?: string;
+}
+
+export interface SyncResult {
+  committed: boolean;
+  pulled: boolean;
+  rebased: boolean;
+  pushed: boolean;
   error?: string;
 }
 
@@ -34,7 +49,11 @@ export class Git {
   ) {}
 
   private errorMessage(error: unknown): string {
-    const candidate = error as { stderr?: Buffer; stdout?: Buffer; message?: string };
+    const candidate = error as {
+      stderr?: Buffer;
+      stdout?: Buffer;
+      message?: string;
+    };
     const stderr = candidate.stderr?.toString().trim();
     const stdout = candidate.stdout?.toString().trim();
     return stderr || stdout || candidate.message || String(error);
@@ -72,6 +91,27 @@ export class Git {
     return this.run(["rev-parse", "--abbrev-ref", "HEAD"], true) || "main";
   }
 
+  private resolveRemote(): { remote?: string; error?: string } {
+    const remotes = this.remotes();
+    const remote =
+      this.remote ?? (remotes.includes("origin") ? "origin" : remotes[0]);
+    if (!remote) {
+      return {};
+    }
+    if (!remotes.includes(remote) && !isRemoteTarget(remote)) {
+      return { error: `remote "${remote}" is not configured` };
+    }
+    return { remote };
+  }
+
+  private remoteHasBranch(remote: string, branch: string): boolean {
+    const heads = this.run(
+      ["ls-remote", "--heads", remote, `refs/heads/${branch}`],
+      true,
+    );
+    return Boolean(heads);
+  }
+
   async commit(message: string): Promise<boolean> {
     if (!this.isRepo()) return false;
 
@@ -83,27 +123,123 @@ export class Git {
     return true;
   }
 
+  async pull(): Promise<PullResult> {
+    if (!this.isRepo()) {
+      return { pulled: false, error: "not a git repository" };
+    }
+
+    const { remote, error } = this.resolveRemote();
+    if (error) {
+      return { pulled: false, error };
+    }
+    if (!remote) {
+      return { pulled: false };
+    }
+
+    const branch = this.currentBranch();
+    if (!this.remoteHasBranch(remote, branch)) {
+      return { pulled: false };
+    }
+
+    const beforeHead = this.run(["rev-parse", "HEAD"], true);
+    try {
+      this.run(["pull", "--rebase", "--autostash", remote, branch]);
+      const afterHead = this.run(["rev-parse", "HEAD"], true);
+      return {
+        pulled: true,
+        ...(beforeHead && afterHead && beforeHead !== afterHead
+          ? { rebased: true }
+          : {}),
+      };
+    } catch (pullError) {
+      this.run(["rebase", "--abort"], true);
+      return { pulled: false, error: this.errorMessage(pullError) };
+    }
+  }
+
   async push(): Promise<PushResult> {
     if (!this.isRepo()) {
       return { pushed: false, error: "not a git repository" };
     }
 
-    const remotes = this.remotes();
-    const remote =
-      this.remote ?? (remotes.includes("origin") ? "origin" : remotes[0]);
+    const { remote, error } = this.resolveRemote();
+    if (error) {
+      return { pushed: false, error };
+    }
     if (!remote) {
       return { pushed: false };
     }
 
-    if (!remotes.includes(remote) && !isRemoteTarget(remote)) {
-      return { pushed: false, error: `remote "${remote}" is not configured` };
+    const branch = this.currentBranch();
+    try {
+      this.run(["push", remote, branch]);
+      return { pushed: true };
+    } catch (firstError) {
+      try {
+        this.run(["pull", "--rebase", "--autostash", remote, branch]);
+      } catch {
+        this.run(["rebase", "--abort"], true);
+        return { pushed: false, error: this.errorMessage(firstError) };
+      }
+
+      try {
+        this.run(["push", remote, branch]);
+        return { pushed: true, rebased: true };
+      } catch (retryError) {
+        return { pushed: false, error: this.errorMessage(retryError) };
+      }
+    }
+  }
+
+  async sync(
+    options: {
+      commitMessage?: string;
+      autoCommit?: boolean;
+      autoPush?: boolean;
+    } = {},
+  ): Promise<SyncResult> {
+    if (!this.isRepo()) {
+      return {
+        committed: false,
+        pulled: false,
+        rebased: false,
+        pushed: false,
+        error: "not a git repository",
+      };
     }
 
-    try {
-      this.run(["push", remote, this.currentBranch()]);
-      return { pushed: true };
-    } catch (error) {
-      return { pushed: false, error: this.errorMessage(error) };
+    const autoCommit = options.autoCommit ?? true;
+    const autoPush = options.autoPush ?? true;
+    const commitMessage = options.commitMessage ?? "Scribe: sync journal";
+
+    const committed = autoCommit ? await this.commit(commitMessage) : false;
+    const pullResult = await this.pull();
+    if (pullResult.error) {
+      return {
+        committed,
+        pulled: false,
+        rebased: false,
+        pushed: false,
+        error: pullResult.error,
+      };
     }
+
+    let pushed = false;
+    let rebased = Boolean(pullResult.rebased);
+    let pushError: string | undefined;
+    if (autoPush) {
+      const pushResult = await this.push();
+      pushed = pushResult.pushed;
+      rebased = rebased || Boolean(pushResult.rebased);
+      pushError = pushResult.error;
+    }
+
+    return {
+      committed,
+      pulled: pullResult.pulled,
+      rebased,
+      pushed,
+      ...(pushError ? { error: pushError } : {}),
+    };
   }
 }

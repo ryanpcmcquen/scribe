@@ -78,12 +78,50 @@ function workspaceShortLabel(workspace: string): string {
   return parts[parts.length - 1] || trimmed;
 }
 
-export function rankScribeEntries(entries: KnowledgeEntry[]): FocusItem[] {
-  const items: FocusItem[] = entries.map((entry) => ({
-    entry,
-    score: CATEGORY_WEIGHTS[entry.category] ?? 0,
-    source: "scribe" as const,
-  }));
+function parseUtcDayMillis(dateStr: string): number | null {
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+/**
+ * Compute age-based score decay for a knowledge entry relative to `asOfDate`.
+ * Today's entries have 0 decay; older entries decay gently so fresh findings
+ * and decisions surface above stale entries in `scribe focus`.
+ */
+export function recencyDecay(
+  entryDate: string,
+  asOfDate: string = localDate(),
+): number {
+  const entryMs = parseUtcDayMillis(entryDate);
+  const asOfMs = parseUtcDayMillis(asOfDate);
+  if (entryMs === null || asOfMs === null) return 0;
+
+  const days = Math.floor((asOfMs - entryMs) / 86_400_000);
+  if (days <= 0) return 0;
+  if (days <= 3) return 0.25;
+  if (days <= 7) return 0.5;
+  if (days <= 14) return 1.0;
+  if (days <= 30) return 1.25;
+  return 1.5;
+}
+
+export function rankScribeEntries(
+  entries: KnowledgeEntry[],
+  asOfDate: string = localDate(),
+): FocusItem[] {
+  const items: FocusItem[] = entries.map((entry) => {
+    const base = CATEGORY_WEIGHTS[entry.category] ?? 0;
+    const decay = recencyDecay(entry.date, asOfDate);
+    const score =
+      base > 0 ? Math.max(0.25, Number((base - decay).toFixed(2))) : 0;
+    return {
+      entry,
+      score,
+      source: "scribe" as const,
+      kind: "knowledge" as const,
+    };
+  });
   return items.sort(
     (a, b) => b.score - a.score || b.entry.date.localeCompare(a.entry.date),
   );

@@ -19,6 +19,7 @@ export {
   normalizeExternalCandidates,
   rankReminders,
   rankScribeEntries,
+  recencyDecay,
   SOURCE_DEFAULT_WEIGHTS,
 } from "./merge";
 export { buildContextPack, searchKnowledgeBase } from "./search";
@@ -60,7 +61,7 @@ export type {
   ReminderUpdateInput,
   ScribeEntry,
 } from "./storage";
-export type { GitLike, PushResult } from "./git";
+export type { GitLike, PullResult, PushResult, SyncResult } from "./git";
 export type {
   ScribeOptions,
   CaptureResult,

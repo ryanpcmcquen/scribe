@@ -72,6 +72,7 @@ Commands:
   focus      Rank knowledge entries and pending reminders for a focus list
   search     Search across months over knowledge entries and reminders
   context    Build a compact context pack for a workspace or query
+  sync       Sync journal repo (commit local changes, pull --rebase, push)
   mcp        Start the Model Context Protocol (MCP) server on stdio
   hook       Run an automatic capture hook (post-commit, agent-stop)
   hooks      Install, uninstall, or check git hooks and agent skills
@@ -164,7 +165,10 @@ scribe context --repo "$PWD" --query "storage layout" --json
 
 Compose Scribe's ranked knowledge and pending reminders with external git,
 session, and MCP inputs, or emit `- <workspace>: <title>` bullets directly for
-Flint's morning brief:
+Flint's morning brief. Knowledge entries apply gentle recency decay relative to
+`--date <YYYY-MM-DD>` (defaulting to today) so fresh findings surface above
+stale entries, while active reminders hold their priority score until completed
+or snoozed:
 
 ```bash
 scribe focus --bullets --limit 5
@@ -175,6 +179,18 @@ scribe focus --stdin --limit 5 --json <<'JSON'
   "sessions": [{ "title": "Pick up: Scribe build", "workspace": "~/code/scribe" }]
 }
 JSON
+```
+
+### Multi-Machine Git Sync & Rebase Resilience
+
+When pushing after `scribe capture` or `scribe reminders`, Scribe automatically
+retries a rejected non-fast-forward push by running
+`git pull --rebase --autostash` and pushing again (`rebased: true`), aborting
+cleanly if a conflict occurs. You can also synchronize the journal explicitly at
+any time:
+
+```bash
+scribe sync --json
 ```
 
 Capture options:

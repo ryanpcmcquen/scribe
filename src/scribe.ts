@@ -1,5 +1,5 @@
 import { DEFAULT_WORKSPACE } from "./config";
-import { Git } from "./git";
+import { Git, SyncResult } from "./git";
 import {
   KnowledgeBase,
   KnowledgeEntry,
@@ -39,6 +39,7 @@ export interface CaptureResult {
   path: string;
   committed: boolean;
   pushed: boolean;
+  rebased?: boolean;
   deduplicated?: boolean;
   pushError?: string;
 }
@@ -49,6 +50,7 @@ export interface ReminderUpdateResult {
   month: string;
   committed: boolean;
   pushed: boolean;
+  rebased?: boolean;
   pushError?: string;
 }
 
@@ -70,6 +72,7 @@ export class Scribe {
   private async commitAndPush(message: string): Promise<{
     committed: boolean;
     pushed: boolean;
+    rebased?: boolean;
     pushError?: string;
   }> {
     const committed = this.autoCommit
@@ -77,18 +80,33 @@ export class Scribe {
       : false;
 
     let pushed = false;
+    let rebased: boolean | undefined;
     let pushError: string | undefined;
     if (this.autoPush && committed) {
       const result = await this.git.push();
       pushed = result.pushed;
+      rebased = result.rebased;
       pushError = result.error;
     }
 
     return {
       committed,
       pushed,
+      ...(rebased ? { rebased: true } : {}),
       ...(pushError ? { pushError } : {}),
     };
+  }
+
+  /**
+   * Synchronize the journal repository with its configured remote: commit
+   * uncommitted local changes, pull with rebase/autostash, and push.
+   */
+  async sync(commitMessage?: string): Promise<SyncResult> {
+    return this.git.sync({
+      commitMessage,
+      autoCommit: this.autoCommit,
+      autoPush: this.autoPush,
+    });
   }
 
   /**
@@ -226,7 +244,10 @@ export class Scribe {
    * Rank accumulated Scribe knowledge entries and active reminders for Flint's focus merge.
    */
   rank(month?: string, asOfDate?: string): FocusItem[] {
-    const knowledgeItems = rankScribeEntries(this.storage.readKnowledge(month));
+    const knowledgeItems = rankScribeEntries(
+      this.storage.readKnowledge(month),
+      asOfDate,
+    );
     const reminderItems = rankReminders(
       this.storage.readReminders(month),
       asOfDate,
@@ -237,7 +258,10 @@ export class Scribe {
   }
 
   rankAll(asOfDate?: string): FocusItem[] {
-    const knowledgeItems = rankScribeEntries(this.storage.readAllKnowledge());
+    const knowledgeItems = rankScribeEntries(
+      this.storage.readAllKnowledge(),
+      asOfDate,
+    );
     const reminderItems = rankReminders(
       this.storage.readAllReminders(),
       asOfDate,
