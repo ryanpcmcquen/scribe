@@ -30,7 +30,8 @@ From a checkout:
 ```bash
 npm install
 npm run build
-npm link        # optional: puts `scribe` on your PATH
+# optional: puts `scribe` on your PATH
+npm link
 ```
 
 You can also run the built CLI directly:
@@ -42,7 +43,8 @@ node dist/cli.js --help
 ## Quick start
 
 ```bash
-scribe init                       # create ~/notes/scribe-journal + config + git repo
+# create ~/notes/scribe-journal + config + git repo
+scribe init
 scribe capture \
   --title "Storage is split by month" \
   --category decision \
@@ -292,9 +294,12 @@ committing `knowledge/` or `reminders/` here.
 ## Development
 
 ```bash
-npm run build      # compile TypeScript to dist/
-npm run typecheck  # type-check without emitting
-npm test           # build, then run the test suite
+# compile TypeScript to dist/
+npm run build
+# type-check without emitting
+npm run typecheck
+# build, then run the test suite
+npm test
 ```
 
 ## Privacy

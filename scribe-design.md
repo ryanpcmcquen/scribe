@@ -44,7 +44,8 @@ Scribe ships a dependency-free Node CLI (`src/cli.ts`):
 
     scribe init
     scribe capture --title <title> --category <category> --body <markdown>
-    scribe capture --stdin          # JSON entry from stdin
+    # JSON entry from stdin
+    scribe capture --stdin
     scribe read [--month YYYY-MM] [--all] [--repo <path>] [--json]
     scribe reminders [done|snooze|reopen <query>] [--status pending|done|snoozed|all] [--pending] [--json]
     scribe focus [--month YYYY-MM] [--all] [--repo <path>] [--limit <N>] [--stdin] [--bullets] [--json]

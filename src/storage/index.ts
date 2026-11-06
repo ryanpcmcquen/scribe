@@ -23,7 +23,8 @@ export function redactHomePaths(text: string, home: string = homedir()): string 
 }
 
 export interface KnowledgeEntry {
-  date: string; // YYYY-MM-DD
+  // YYYY-MM-DD
+  date: string;
   title: string;
   workspace: string;
   agent: string;
@@ -34,14 +35,17 @@ export interface KnowledgeEntry {
 export type ReminderStatus = "pending" | "done" | "snoozed";
 
 export interface ReminderEntry {
-  date: string; // YYYY-MM-DD
+  // YYYY-MM-DD
+  date: string;
   title: string;
   priority: "p1" | "p2" | "p3";
   context: string;
   action: string;
   status?: ReminderStatus;
-  snoozedUntil?: string; // YYYY-MM-DD
-  completedAt?: string; // YYYY-MM-DD
+  // YYYY-MM-DD
+  snoozedUntil?: string;
+  // YYYY-MM-DD
+  completedAt?: string;
 }
 
 export interface ReminderUpdateInput {
@@ -98,11 +102,11 @@ export class KnowledgeBase {
   }
 
   knowledgeFileFor(date: string): string {
-    return this.knowledgePath(date.slice(0, 7)); // YYYY-MM
+    return this.knowledgePath(date.slice(0, 7));
   }
 
   reminderFileFor(date: string): string {
-    return this.remindersPath(date.slice(0, 7)); // YYYY-MM
+    return this.remindersPath(date.slice(0, 7));
   }
 
   private ensureFile(filePath: string, month: string): void {
@@ -161,7 +165,7 @@ export class KnowledgeBase {
 
   appendKnowledgeEntry(entry: KnowledgeEntry): string {
     const sanitized = this.sanitizeKnowledgeEntry(entry);
-    const month = sanitized.date.slice(0, 7); // YYYY-MM
+    const month = sanitized.date.slice(0, 7);
     const filePath = this.knowledgePath(month);
     this.ensureFile(filePath, month);
     const entryBlock = `\n### ${sanitized.date} — ${sanitized.title}\n\n- **Workspace:** ${sanitized.workspace}\n- **Agent:** ${sanitized.agent}\n- **Category:** ${sanitized.category}\n\n${sanitized.body}\n`;
@@ -195,7 +199,7 @@ export class KnowledgeBase {
 
   appendReminder(entry: ReminderEntry): string {
     const sanitized = this.sanitizeReminderEntry(entry);
-    const month = sanitized.date.slice(0, 7); // YYYY-MM
+    const month = sanitized.date.slice(0, 7);
     const filePath = this.remindersPath(month);
     this.ensureFile(filePath, month);
     appendFileSync(filePath, this.formatReminderBlock(sanitized));

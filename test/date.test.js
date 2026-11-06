@@ -6,7 +6,8 @@ const test = require("node:test");
 const { currentMonth, isDate, isMonth, localDate } = require("../dist/date.js");
 
 test("localDate uses local calendar fields", () => {
-  const date = new Date(2026, 10, 4, 23, 30); // Nov 4 2026, 11:30pm local
+  // Nov 4 2026, 11:30pm local
+  const date = new Date(2026, 10, 4, 23, 30);
   assert.equal(localDate(date), "2026-11-04");
   assert.equal(currentMonth(date), "2026-11");
 });
