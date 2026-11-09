@@ -26,6 +26,7 @@ import {
   SearchOptions,
   SearchResultItem,
 } from "./search";
+import { computeStats, ScribeStats, StatsOptions } from "./stats";
 
 export interface ScribeOptions {
   workspacePath?: string;
@@ -283,6 +284,13 @@ export class Scribe {
    */
   context(options: ContextOptions = {}): ContextPack {
     return buildContextPack(this.storage, options);
+  }
+
+  /**
+   * Compute summary statistics across knowledge entries and reminders.
+   */
+  stats(options: StatsOptions = {}): ScribeStats {
+    return computeStats(this.storage, options);
   }
 
   /**

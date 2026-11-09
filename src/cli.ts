@@ -22,12 +22,16 @@ import { currentMonth, isDate, isMonth, localDate } from "./date";
 import { Git, isRemoteTarget } from "./git";
 import {
   AgentStopPayload,
+  gitHooksStatusInDir,
   gitHookStatus,
+  installAgentSkills,
   installGitHook,
+  installGitHooksInDir,
   installOpenCodeSkill,
   runAgentStopHook,
   runPostCommitHook,
   uninstallGitHook,
+  uninstallGitHooksInDir,
 } from "./hooks";
 import { runMcpServer } from "./mcp";
 import {
@@ -67,6 +71,7 @@ interface CaptureInput {
 
 const BOOLEAN_FLAGS = new Set([
   "all",
+  "all-agents",
   "bullets",
   "dry-run",
   "force",
@@ -693,6 +698,39 @@ function commandContext(args: ParsedArgs, config: ScribeConfig): number {
   return 0;
 }
 
+function commandStats(args: ParsedArgs, config: ScribeConfig): number {
+  const json = flagBool(args.flags, "json");
+  const all = flagBool(args.flags, "all");
+  const month = flagString(args.flags, "month");
+  const workspace = flagString(args.flags, "repo");
+  const asOfDate = flagString(args.flags, "date");
+
+  if (all && month) {
+    throw new Error("use either --month or --all, not both");
+  }
+  if (month && !isMonth(month)) {
+    throw new Error(`invalid month "${month}" (expected YYYY-MM)`);
+  }
+  if (asOfDate && !isDate(asOfDate)) {
+    throw new Error(`invalid date "${asOfDate}" (expected YYYY-MM-DD)`);
+  }
+
+  const scribe = new Scribe({
+    workspacePath: config.workspace,
+    autoCommit: false,
+    autoPush: false,
+  });
+  const stats = scribe.stats({ month, all, workspace, asOfDate });
+
+  if (json) {
+    printJson({ ok: true, ...stats });
+  } else {
+    process.stdout.write(stats.markdown);
+  }
+
+  return 0;
+}
+
 async function commandFocus(
   args: ParsedArgs,
   config: ScribeConfig,
@@ -958,20 +996,44 @@ async function commandHook(
   );
 }
 
-function commandHooks(args: ParsedArgs): number {
+function commandHooks(args: ParsedArgs, config: ScribeConfig): number {
   const action = args.positionals[0] ?? "status";
   const json = flagBool(args.flags, "json");
   const repoPath = flagString(args.flags, "repo") ?? process.cwd();
-  const useGit = flagBool(args.flags, "git") || !flagBool(args.flags, "skills");
-  const useSkills = flagBool(args.flags, "skills");
+  const scanDir = flagString(args.flags, "scan");
+  const useAllAgents = flagBool(args.flags, "all-agents");
+  const useSkills = flagBool(args.flags, "skills") || useAllAgents;
+  const useGit =
+    flagBool(args.flags, "git") || Boolean(scanDir) || !useSkills;
 
   if (action === "install") {
-    const gitResult = useGit ? installGitHook(repoPath) : undefined;
-    const skillResult = useSkills ? installOpenCodeSkill() : undefined;
+    const gitHooks =
+      useGit && scanDir
+        ? installGitHooksInDir(scanDir, { skipWorkspace: config.workspace })
+        : undefined;
+    const gitResult =
+      useGit && !scanDir ? installGitHook(repoPath) : undefined;
+    const skillResult =
+      useSkills && !useAllAgents ? installOpenCodeSkill() : undefined;
+    const agentSkills =
+      useSkills && useAllAgents ? installAgentSkills() : undefined;
+    const openCodeFromAll = agentSkills?.find((s) => s.agent === "opencode");
+
     const payload = {
       ok: true,
       ...(gitResult ? { gitHook: gitResult } : {}),
-      ...(skillResult ? { openCodeSkill: skillResult } : {}),
+      ...(gitHooks ? { gitHooks } : {}),
+      ...(skillResult
+        ? { openCodeSkill: skillResult }
+        : openCodeFromAll
+          ? {
+              openCodeSkill: {
+                installed: openCodeFromAll.installed,
+                skillPath: openCodeFromAll.skillPath,
+              },
+            }
+          : {}),
+      ...(agentSkills ? { agentSkills } : {}),
     };
     if (json) {
       printJson(payload);
@@ -979,14 +1041,44 @@ function commandHooks(args: ParsedArgs): number {
       if (gitResult) {
         console.log(`Installed git post-commit hook: ${gitResult.hookPath}`);
       }
+      if (gitHooks) {
+        for (const item of gitHooks) {
+          console.log(
+            `Installed git post-commit hook (${item.repo}): ${item.hookPath}`,
+          );
+        }
+      }
       if (skillResult) {
         console.log(`Installed OpenCode skill: ${skillResult.skillPath}`);
+      }
+      if (agentSkills) {
+        for (const item of agentSkills) {
+          console.log(`Installed ${item.agent} skill: ${item.skillPath}`);
+        }
       }
     }
     return 0;
   }
 
   if (action === "uninstall") {
+    if (scanDir) {
+      const gitHooks = uninstallGitHooksInDir(scanDir, {
+        skipWorkspace: config.workspace,
+      });
+      if (json) {
+        printJson({ ok: true, gitHooks });
+      } else {
+        for (const item of gitHooks) {
+          console.log(
+            item.removed
+              ? `Removed git post-commit hook (${item.repo}): ${item.hookPath}`
+              : `No Scribe git hook found (${item.repo}): ${item.hookPath}`,
+          );
+        }
+      }
+      return 0;
+    }
+
     const gitResult = uninstallGitHook(repoPath);
     if (json) {
       printJson({ ok: true, gitHook: gitResult });
@@ -1001,6 +1093,22 @@ function commandHooks(args: ParsedArgs): number {
   }
 
   if (action === "status") {
+    if (scanDir) {
+      const gitHooks = gitHooksStatusInDir(scanDir, {
+        skipWorkspace: config.workspace,
+      });
+      if (json) {
+        printJson({ ok: true, gitHooks });
+      } else {
+        for (const item of gitHooks) {
+          console.log(
+            `git post-commit hook (${item.repo}): ${item.installed ? "installed" : "not installed"} (${item.hookPath})`,
+          );
+        }
+      }
+      return 0;
+    }
+
     const gitResult = gitHookStatus(repoPath);
     if (json) {
       printJson({ ok: true, gitHook: gitResult });
@@ -1043,6 +1151,7 @@ Commands:
   focus      Rank knowledge entries and pending reminders for a focus list
   search     Search across months over knowledge entries and reminders
   context    Build a compact context pack for a workspace or query
+  stats      Show summary statistics across knowledge entries and reminders
   sync       Sync journal repo (commit local changes, pull --rebase, push)
   mcp        Start the Model Context Protocol (MCP) server on stdio
   hook       Run an automatic capture hook (post-commit, agent-stop)
@@ -1114,6 +1223,8 @@ export async function main(argv: string[]): Promise<number> {
       return commandSearch(args, config);
     case "context":
       return commandContext(args, config);
+    case "stats":
+      return commandStats(args, config);
     case "sync":
       return commandSync(args, config);
     case "mcp":
@@ -1121,7 +1232,7 @@ export async function main(argv: string[]): Promise<number> {
     case "hook":
       return commandHook(args, config);
     case "hooks":
-      return commandHooks(args);
+      return commandHooks(args, config);
     case "doctor":
       return commandDoctor(args, config, configPath);
     case "config":

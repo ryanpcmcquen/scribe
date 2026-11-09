@@ -10,6 +10,7 @@ export {
   isReminderActive,
   KnowledgeBase,
   redactHomePaths,
+  redactSecrets,
 } from "./storage";
 export { Git, isRemoteTarget } from "./git";
 export {
@@ -23,6 +24,7 @@ export {
   SOURCE_DEFAULT_WEIGHTS,
 } from "./merge";
 export { buildContextPack, searchKnowledgeBase } from "./search";
+export { computeStats } from "./stats";
 export {
   DEFAULT_AGENT,
   DEFAULT_WORKSPACE,
@@ -41,13 +43,19 @@ export {
   ScribeMcpServer,
 } from "./mcp";
 export {
+  ALL_SKILL_AGENTS,
+  discoverGitRepos,
+  gitHooksStatusInDir,
   gitHookStatus,
   inferCategory,
+  installAgentSkills,
   installGitHook,
+  installGitHooksInDir,
   installOpenCodeSkill,
   runAgentStopHook,
   runPostCommitHook,
   uninstallGitHook,
+  uninstallGitHooksInDir,
 } from "./hooks";
 export {
   createOpenCodePlugin,
@@ -81,10 +89,14 @@ export type {
   SearchOptions,
   SearchResultItem,
 } from "./search";
+export type { CountItem, ScribeStats, StatsOptions } from "./stats";
 export type { ConfigOverrides, ScribeConfig } from "./config";
 export type { JsonRpcRequest, JsonRpcResponse } from "./mcp";
 export type {
+  AgentSkillInstallResult,
+  AgentSkillTarget,
   AgentStopPayload,
+  DiscoveredRepoHookStatus,
   GitHookInstallResult,
   HookCaptureOutcome,
   PostCommitHookOptions,

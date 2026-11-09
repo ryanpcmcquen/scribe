@@ -72,6 +72,7 @@ Commands:
   focus      Rank knowledge entries and pending reminders for a focus list
   search     Search across months over knowledge entries and reminders
   context    Build a compact context pack for a workspace or query
+  stats      Show summary statistics across knowledge entries and reminders
   sync       Sync journal repo (commit local changes, pull --rebase, push)
   mcp        Start the Model Context Protocol (MCP) server on stdio
   hook       Run an automatic capture hook (post-commit, agent-stop)
@@ -154,11 +155,13 @@ scribe search --repo "$PWD" --category decision --json
 ```
 
 Retrieve a compact, high-signal context pack (pending reminders, key decisions,
-findings, and recent work) for an agent or human:
+findings, and recent work) for an agent or human, or view summary statistics:
 
 ```bash
 scribe context --repo "$PWD"
 scribe context --repo "$PWD" --query "storage layout" --json
+scribe stats --all
+scribe stats --month 2026-11 --repo "$PWD" --json
 ```
 
 ### Multi-Source Focus & Flint Merge
@@ -212,8 +215,10 @@ Capture options:
 By default, capture writes the monthly file, commits to the journal repo, and
 pushes when a remote is configured. Offline or remote-less journals still
 commit locally; push is a no-op. Identical entries recorded on the same day are
-deduplicated automatically (`deduplicated: true`), and any home-directory path
-in entry fields is scrubbed to `~`.
+deduplicated automatically (`deduplicated: true`), home-directory paths are
+scrubbed to `~`, and common secret/token formats (`ghp_...`, `sk-...`, `AKIA...`,
+Slack `xox[baprs]-...`, `Bearer ...`, private key blocks) are automatically
+redacted before writing.
 
 ## Capture reliability (MCP, hooks, and OpenCode plugin)
 
@@ -222,19 +227,25 @@ finishes a commit/session without invoking `scribe capture`. Scribe layers three
 automatic mechanisms on top of the skills:
 
 1. **Built-in stdio MCP server (`scribe mcp`)** — exposes `scribe_capture`,
-   `scribe_read`, `scribe_reminders`, and `scribe_focus` tools plus
-   `scribe://knowledge/current`, `scribe://reminders/current`, and
-   `scribe://focus/current` resources over JSON-RPC 2.0 stdio (supporting both
-   newline-delimited and `Content-Length` framing).
+   `scribe_read`, `scribe_reminders`, `scribe_focus`, `scribe_search`, and
+   `scribe_context` tools plus `scribe://knowledge/current`,
+   `scribe://reminders/current`, and `scribe://focus/current` resources over
+   JSON-RPC 2.0 stdio (supporting both newline-delimited and `Content-Length`
+   framing).
 2. **Automatic git & agent hooks (`scribe hook` / `scribe hooks`)**:
    - `scribe hooks install --git --repo <path>` installs a managed,
      non-destructive `post-commit` hook that records commits into Scribe
      (skipping the Scribe journal repo itself and deduplicating already-recorded
      commits).
+   - `scribe hooks install|status|uninstall --scan ~/code` bulk-manages
+     `post-commit` hooks across every git repository under a directory while
+     automatically skipping the Scribe journal workspace.
    - `scribe hook agent-stop --stdin` accepts agent stop-hook JSON payloads (or
      falls back to capturing today's latest commit in the workspace).
    - `scribe hooks install --skills` syncs the OpenCode capture skill into
-     `~/.config/opencode/skills/scribe-capture/SKILL.md`.
+     `~/.config/opencode/skills/scribe-capture/SKILL.md`; add `--all-agents` to
+     sync skill templates for OpenCode, Claude Code, Codex, Cline, and
+     Antigravity at once.
 3. **OpenCode V2 server plugin (`dist/plugins/opencode.js`)** — registers the
    four Scribe tools natively, injects the Scribe capture directive into
    session context hooks so the model never forgets to record findings and

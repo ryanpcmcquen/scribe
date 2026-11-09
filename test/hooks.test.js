@@ -9,6 +9,10 @@ const {
   createOpenCodePlugin,
   SCRIBE_SYSTEM_DIRECTIVE,
 } = require("../dist/plugins/opencode.js");
+const {
+  ALL_SKILL_AGENTS,
+  installAgentSkills,
+} = require("../dist/hooks/index.js");
 const { parseJson, runCli, tempDir } = require("./helpers");
 
 const hasGit =
@@ -153,6 +157,56 @@ test("scribe hooks install, status, and uninstall preserve existing post-commit 
   assert.ok(existsSync(hookFile));
   assert.match(readFileSync(hookFile, "utf8"), /echo 'custom hook'/);
   assert.doesNotMatch(readFileSync(hookFile, "utf8"), /scribe hook post-commit/);
+});
+
+test("scribe hooks --scan installs, checks, and uninstalls across multiple repos while skipping journal", (t) => {
+  if (!hasGit) return t.skip("git is not installed");
+  const dir = tempDir(t);
+  const journal = `${dir}/scribe-journal`;
+  const repoOne = `${dir}/repo-one`;
+  const repoTwo = `${dir}/repo-two`;
+  initGitProject(journal);
+  initGitProject(repoOne);
+  initGitProject(repoTwo);
+
+  const env = {
+    SCRIBE_CONFIG: `${dir}/config.json`,
+    SCRIBE_WORKSPACE: journal,
+  };
+
+  const install = parseJson(
+    runCli(["hooks", "install", "--scan", dir, "--json"], { env }),
+  );
+  assert.equal(install.ok, true);
+  assert.equal(install.gitHooks.length, 2);
+  assert.ok(install.gitHooks.every((item) => item.installed === true));
+  assert.equal(existsSync(`${journal}/.git/hooks/post-commit`), false);
+
+  const status = parseJson(
+    runCli(["hooks", "status", "--scan", dir, "--json"], { env }),
+  );
+  assert.equal(status.gitHooks.length, 2);
+  assert.ok(status.gitHooks.every((item) => item.installed === true));
+
+  const uninstall = parseJson(
+    runCli(["hooks", "uninstall", "--scan", dir, "--json"], { env }),
+  );
+  assert.equal(uninstall.gitHooks.length, 2);
+  assert.ok(uninstall.gitHooks.every((item) => item.removed === true));
+});
+
+test("installAgentSkills installs skill templates for all five supported agents", (t) => {
+  const dir = tempDir(t);
+  const homeDir = `${dir}/home`;
+  const configHome = `${dir}/config`;
+
+  const results = installAgentSkills({ homeDir, configHome });
+  assert.equal(results.length, ALL_SKILL_AGENTS.length);
+  for (const item of results) {
+    assert.equal(item.installed, true);
+    assert.ok(existsSync(item.skillPath));
+    assert.match(readFileSync(item.skillPath, "utf8"), /scribe capture/);
+  }
 });
 
 test("createOpenCodePlugin registers tools and injects context directive", async (t) => {

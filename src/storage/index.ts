@@ -22,6 +22,34 @@ export function redactHomePaths(text: string, home: string = homedir()): string 
   return text.replace(new RegExp(`${escaped}(?=/|$|\\s|[.)"'\\],:;])`, "g"), "~");
 }
 
+/**
+ * Scrub common secret and credential formats before writing entries to disk
+ * so tokens or private keys are never committed to the journal repository.
+ */
+export function redactSecrets(text: string): string {
+  if (!text) return text;
+  return text
+    .replace(
+      /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
+      "[REDACTED_PRIVATE_KEY]",
+    )
+    .replace(
+      /\b(gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g,
+      "[REDACTED_GITHUB_TOKEN]",
+    )
+    .replace(
+      /\bsk-(?:ant-|proj-|live-|test-)?[A-Za-z0-9_-]{16,}\b/g,
+      "[REDACTED_API_KEY]",
+    )
+    .replace(/\b(AKIA|ASIA)[0-9A-Z]{16}\b/g, "[REDACTED_AWS_KEY]")
+    .replace(/\bxox[baprs]-[0-9A-Za-z-]{10,}\b/g, "[REDACTED_SLACK_TOKEN]")
+    .replace(/(\bBearer\s+)[A-Za-z0-9._~+/=-]{16,}/gi, "$1[REDACTED_TOKEN]");
+}
+
+function sanitizeText(text: string): string {
+  return redactSecrets(redactHomePaths(text)).trim();
+}
+
 export interface KnowledgeEntry {
   // YYYY-MM-DD
   date: string;
@@ -119,19 +147,19 @@ export class KnowledgeBase {
   sanitizeKnowledgeEntry(entry: KnowledgeEntry): KnowledgeEntry {
     return {
       ...entry,
-      title: redactHomePaths(entry.title).trim(),
-      workspace: redactHomePaths(entry.workspace).trim(),
+      title: sanitizeText(entry.title),
+      workspace: sanitizeText(entry.workspace),
       agent: entry.agent.trim(),
-      body: redactHomePaths(entry.body).trim(),
+      body: sanitizeText(entry.body),
     };
   }
 
   sanitizeReminderEntry(entry: ReminderEntry): ReminderEntry {
     return {
       ...entry,
-      title: redactHomePaths(entry.title).trim(),
-      context: redactHomePaths(entry.context).trim(),
-      action: redactHomePaths(entry.action).trim(),
+      title: sanitizeText(entry.title),
+      context: sanitizeText(entry.context),
+      action: sanitizeText(entry.action),
     };
   }
 

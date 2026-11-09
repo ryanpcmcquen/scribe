@@ -3,6 +3,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -400,21 +401,230 @@ export function gitHookStatus(
   };
 }
 
+export interface DiscoveredRepoHookStatus {
+  repo: string;
+  installed?: boolean;
+  removed?: boolean;
+  hookPath: string;
+}
+
+/**
+ * Recursively discover git repositories under `rootDir` up to `maxDepth`,
+ * skipping the Scribe journal workspace itself.
+ */
+export function discoverGitRepos(
+  rootDir: string,
+  options: { maxDepth?: number; skipWorkspace?: string } = {},
+): string[] {
+  const resolvedRoot = resolvePath(rootDir);
+  if (!existsSync(resolvedRoot)) {
+    throw new Error(`scan directory does not exist: ${resolvedRoot}`);
+  }
+
+  const maxDepth = options.maxDepth ?? 2;
+  const found = new Set<string>();
+
+  function walk(currentDir: string, depth: number): void {
+    if (
+      options.skipWorkspace &&
+      sameRealPath(currentDir, options.skipWorkspace)
+    ) {
+      return;
+    }
+
+    if (existsSync(join(currentDir, ".git"))) {
+      const topLevel = runGit(currentDir, ["rev-parse", "--show-toplevel"]);
+      if (
+        topLevel &&
+        (!options.skipWorkspace ||
+          !sameRealPath(topLevel, options.skipWorkspace))
+      ) {
+        found.add(resolvePath(topLevel));
+      }
+      return;
+    }
+
+    if (depth >= maxDepth) {
+      return;
+    }
+
+    let entries;
+    try {
+      entries = readdirSync(currentDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (
+        entry.name.startsWith(".") ||
+        entry.name === "node_modules" ||
+        entry.name === "dist"
+      ) {
+        continue;
+      }
+      walk(join(currentDir, entry.name), depth + 1);
+    }
+  }
+
+  walk(resolvedRoot, 0);
+  return [...found].sort();
+}
+
+export function installGitHooksInDir(
+  rootDir: string,
+  options: {
+    maxDepth?: number;
+    skipWorkspace?: string;
+    cliCommand?: string;
+  } = {},
+): DiscoveredRepoHookStatus[] {
+  const repos = discoverGitRepos(rootDir, options);
+  return repos.map((repo) => ({
+    repo: tildifyPath(repo),
+    ...installGitHook(repo, options.cliCommand),
+  }));
+}
+
+export function uninstallGitHooksInDir(
+  rootDir: string,
+  options: { maxDepth?: number; skipWorkspace?: string } = {},
+): DiscoveredRepoHookStatus[] {
+  const repos = discoverGitRepos(rootDir, options);
+  return repos.map((repo) => ({
+    repo: tildifyPath(repo),
+    ...uninstallGitHook(repo),
+  }));
+}
+
+export function gitHooksStatusInDir(
+  rootDir: string,
+  options: { maxDepth?: number; skipWorkspace?: string } = {},
+): DiscoveredRepoHookStatus[] {
+  const repos = discoverGitRepos(rootDir, options);
+  return repos.map((repo) => ({
+    repo: tildifyPath(repo),
+    ...gitHookStatus(repo),
+  }));
+}
+
+export type AgentSkillTarget =
+  | "opencode"
+  | "claude-code"
+  | "codex"
+  | "cline"
+  | "antigravity";
+
+export const ALL_SKILL_AGENTS: AgentSkillTarget[] = [
+  "opencode",
+  "claude-code",
+  "codex",
+  "cline",
+  "antigravity",
+];
+
+export interface AgentSkillInstallResult {
+  agent: AgentSkillTarget;
+  installed: boolean;
+  skillPath: string;
+}
+
+function targetSkillPathForAgent(
+  agent: AgentSkillTarget,
+  homeDir: string,
+  configHome: string,
+): string {
+  switch (agent) {
+    case "opencode":
+      return join(
+        resolvePath(configHome),
+        "opencode",
+        "skills",
+        "scribe-capture",
+        "SKILL.md",
+      );
+    case "claude-code":
+      return join(
+        resolvePath(homeDir),
+        ".claude",
+        "skills",
+        "scribe-capture",
+        "SKILL.md",
+      );
+    case "codex":
+      return join(
+        resolvePath(homeDir),
+        ".codex",
+        "skills",
+        "scribe-capture",
+        "SKILL.md",
+      );
+    case "cline":
+      return join(
+        resolvePath(homeDir),
+        ".cline",
+        "skills",
+        "scribe-capture",
+        "SKILL.md",
+      );
+    case "antigravity":
+      return join(
+        resolvePath(homeDir),
+        ".antigravity",
+        "skills",
+        "scribe-capture",
+        "SKILL.md",
+      );
+  }
+}
+
+export function installAgentSkills(
+  options: {
+    agents?: AgentSkillTarget[];
+    homeDir?: string;
+    configHome?: string;
+  } = {},
+): AgentSkillInstallResult[] {
+  const homeDir = options.homeDir ?? homedir();
+  const configHome =
+    options.configHome ??
+    process.env.XDG_CONFIG_HOME ??
+    join(homeDir, ".config");
+  const agents = options.agents ?? ALL_SKILL_AGENTS;
+
+  return agents.map((agent) => {
+    const sourceSkill = join(
+      __dirname,
+      "..",
+      "..",
+      "skills",
+      agent,
+      "scribe-capture.md",
+    );
+    if (!existsSync(sourceSkill)) {
+      throw new Error(`Skill template for ${agent} not found at ${sourceSkill}`);
+    }
+    const targetSkill = targetSkillPathForAgent(agent, homeDir, configHome);
+    mkdirSync(dirname(targetSkill), { recursive: true });
+    writeFileSync(targetSkill, readFileSync(sourceSkill, "utf8"));
+    return {
+      agent,
+      installed: true,
+      skillPath: targetSkill,
+    };
+  });
+}
+
 export function installOpenCodeSkill(
   configHome: string = process.env.XDG_CONFIG_HOME || join(homedir(), ".config"),
 ): { installed: boolean; skillPath: string } {
-  const sourceSkill = join(__dirname, "..", "..", "skills", "opencode", "scribe-capture.md");
-  if (!existsSync(sourceSkill)) {
-    throw new Error(`OpenCode skill template not found at ${sourceSkill}`);
-  }
-  const targetSkill = join(
-    resolvePath(configHome),
-    "opencode",
-    "skills",
-    "scribe-capture",
-    "SKILL.md",
-  );
-  mkdirSync(dirname(targetSkill), { recursive: true });
-  writeFileSync(targetSkill, readFileSync(sourceSkill, "utf8"));
-  return { installed: true, skillPath: targetSkill };
+  const [result] = installAgentSkills({
+    agents: ["opencode"],
+    configHome,
+  });
+  return {
+    installed: result.installed,
+    skillPath: result.skillPath,
+  };
 }

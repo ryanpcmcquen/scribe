@@ -4,7 +4,11 @@ const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const test = require("node:test");
 
-const { KnowledgeBase, redactHomePaths } = require("../dist/storage/index.js");
+const {
+  KnowledgeBase,
+  redactHomePaths,
+  redactSecrets,
+} = require("../dist/storage/index.js");
 const { Scribe } = require("../dist/scribe.js");
 const { tempDir } = require("./helpers");
 
@@ -166,6 +170,49 @@ test("redactHomePaths scrubs home directory references across entry fields", (t)
   assert.equal(entry.title, "Inspect ~/code/scribe");
   assert.equal(entry.workspace, "~/code/scribe");
   assert.equal(entry.body, "Found config under ~/.config/scribe/config.json.");
+});
+
+test("redactSecrets scrubs credentials and private keys across entry fields", (t) => {
+  const ghToken = `ghp_${"A".repeat(28)}`;
+  const skToken = `sk-proj-${"B".repeat(24)}`;
+  const awsKey = `AKIA${"C".repeat(16)}`;
+  const slackToken = `xoxb-${"1".repeat(12)}-${"a".repeat(12)}`;
+  const bearer = `Bearer ${"Z".repeat(24)}`;
+  const privateKey = [
+    "-----BEGIN RSA PRIVATE KEY-----",
+    "MIIBOgIBAAJBALfakekeydata==",
+    "-----END RSA PRIVATE KEY-----",
+  ].join("\n");
+
+  const raw = `gh=${ghToken} api=${skToken} aws=${awsKey} slack=${slackToken} auth=${bearer}\n${privateKey}`;
+  const scrubbed = redactSecrets(raw);
+
+  assert.doesNotMatch(scrubbed, /ghp_/);
+  assert.doesNotMatch(scrubbed, /sk-proj-/);
+  assert.doesNotMatch(scrubbed, /AKIA/);
+  assert.doesNotMatch(scrubbed, /xoxb-/);
+  assert.doesNotMatch(scrubbed, /MIIBOg/);
+  assert.match(scrubbed, /\[REDACTED_GITHUB_TOKEN\]/);
+  assert.match(scrubbed, /\[REDACTED_API_KEY\]/);
+  assert.match(scrubbed, /\[REDACTED_AWS_KEY\]/);
+  assert.match(scrubbed, /\[REDACTED_SLACK_TOKEN\]/);
+  assert.match(scrubbed, /Bearer \[REDACTED_TOKEN\]/);
+  assert.match(scrubbed, /\[REDACTED_PRIVATE_KEY\]/);
+
+  const dir = tempDir(t);
+  const kb = new KnowledgeBase(dir);
+  kb.appendKnowledgeEntry({
+    date: "2026-11-09",
+    title: `Rotated token ${ghToken}`,
+    workspace: "~/code/scribe",
+    agent: "OpenCode",
+    category: "finding",
+    body: `Replaced ${skToken} in config.`,
+  });
+
+  const [saved] = kb.readKnowledge("2026-11");
+  assert.equal(saved.title, "Rotated token [REDACTED_GITHUB_TOKEN]");
+  assert.equal(saved.body, "Replaced [REDACTED_API_KEY] in config.");
 });
 
 test("Scribe.record deduplicates identical entries on the same date", async (t) => {
