@@ -38,11 +38,32 @@ export function redactSecrets(text: string): string {
       "[REDACTED_GITHUB_TOKEN]",
     )
     .replace(
+      /\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b/g,
+      "[REDACTED_STRIPE_KEY]",
+    )
+    .replace(
       /\bsk-(?:ant-|proj-|live-|test-)?[A-Za-z0-9_-]{16,}\b/g,
       "[REDACTED_API_KEY]",
     )
+    .replace(/\bAIza[0-9A-Za-z_-]{35}\b/g, "[REDACTED_GOOGLE_API_KEY]")
     .replace(/\b(AKIA|ASIA)[0-9A-Z]{16}\b/g, "[REDACTED_AWS_KEY]")
     .replace(/\bxox[baprs]-[0-9A-Za-z-]{10,}\b/g, "[REDACTED_SLACK_TOKEN]")
+    .replace(
+      /https?:\/\/hooks\.slack\.com\/services\/[A-Z0-9]{6,}\/[A-Z0-9]{6,}\/[A-Za-z0-9_-]{16,}/gi,
+      "[REDACTED_SLACK_WEBHOOK]",
+    )
+    .replace(/\bglpat-[A-Za-z0-9_-]{20,}\b/g, "[REDACTED_GITLAB_TOKEN]")
+    .replace(/\bnpm_[A-Za-z0-9]{30,}\b/g, "[REDACTED_NPM_TOKEN]")
+    .replace(/\bpypi-[A-Za-z0-9_-]{40,}\b/g, "[REDACTED_PYPI_TOKEN]")
+    .replace(
+      /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "[REDACTED_JWT]",
+    )
+    .replace(
+      /(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd|secret|token|credential)\s*[:=]\s*)(["']?)[^\s"'`,;]{8,}\2/gi,
+      "$1[REDACTED_CREDENTIAL]",
+    )
+    .replace(/(:\/\/[^:/\s]+:)[^@/\s]+@/g, "$1[REDACTED_CREDENTIAL]@")
     .replace(/(\bBearer\s+)[A-Za-z0-9._~+/=-]{16,}/gi, "$1[REDACTED_TOKEN]");
 }
 
@@ -149,7 +170,7 @@ export class KnowledgeBase {
       ...entry,
       title: sanitizeText(entry.title),
       workspace: sanitizeText(entry.workspace),
-      agent: entry.agent.trim(),
+      agent: sanitizeText(entry.agent),
       body: sanitizeText(entry.body),
     };
   }

@@ -178,26 +178,73 @@ test("redactSecrets scrubs credentials and private keys across entry fields", (t
   const awsKey = `AKIA${"C".repeat(16)}`;
   const slackToken = `xoxb-${"1".repeat(12)}-${"a".repeat(12)}`;
   const bearer = `Bearer ${"Z".repeat(24)}`;
+  const googleKey = `AIza${"D".repeat(35)}`;
+  const gitlabToken = `glpat-${"E".repeat(24)}`;
+  const npmToken = `npm_${"F".repeat(36)}`;
+  const pypiToken = `pypi-${"G".repeat(50)}`;
+  const stripeKey = `rk_live_${"H".repeat(24)}`;
+  const stripeSecretKey = `sk_live_${"O".repeat(24)}`;
+  const jwt = `${"eyJ".concat("I".repeat(12))}.${"J".repeat(14)}.${"K".repeat(14)}`;
+  const slackWebhook = `https://hooks.slack.com/services/${"A".repeat(10)}/${"B".repeat(10)}/${"C".repeat(24)}`;
   const privateKey = [
     "-----BEGIN RSA PRIVATE KEY-----",
     "MIIBOgIBAAJBALfakekeydata==",
     "-----END RSA PRIVATE KEY-----",
   ].join("\n");
 
-  const raw = `gh=${ghToken} api=${skToken} aws=${awsKey} slack=${slackToken} auth=${bearer}\n${privateKey}`;
+  const raw = [
+    `gh=${ghToken}`,
+    `api=${skToken}`,
+    `aws=${awsKey}`,
+    `slack=${slackToken}`,
+    `auth=${bearer}`,
+    `google=${googleKey}`,
+    `gitlab=${gitlabToken}`,
+    `npm=${npmToken}`,
+    `pypi=${pypiToken}`,
+    `stripe=${stripeKey}`,
+    `stripe_secret=${stripeSecretKey}`,
+    `jwt=${jwt}`,
+    `webhook=${slackWebhook}`,
+    `auth_token=${"P".repeat(20)}`,
+    `api_key="${"L".repeat(20)}"`,
+    `password=${"M".repeat(20)}`,
+    `url=https://user:${"N".repeat(20)}@example.test/path`,
+    privateKey,
+  ].join("\n");
   const scrubbed = redactSecrets(raw);
 
   assert.doesNotMatch(scrubbed, /ghp_/);
   assert.doesNotMatch(scrubbed, /sk-proj-/);
   assert.doesNotMatch(scrubbed, /AKIA/);
   assert.doesNotMatch(scrubbed, /xoxb-/);
+  assert.doesNotMatch(scrubbed, /AIza/);
+  assert.doesNotMatch(scrubbed, /glpat-/);
+  assert.doesNotMatch(scrubbed, /npm_/);
+  assert.doesNotMatch(scrubbed, /pypi-/);
+  assert.doesNotMatch(scrubbed, /rk_live_/);
+  assert.doesNotMatch(scrubbed, /sk_live_/);
+  assert.doesNotMatch(scrubbed, /eyJ/);
+  assert.doesNotMatch(scrubbed, /hooks\.slack\.com/);
   assert.doesNotMatch(scrubbed, /MIIBOg/);
   assert.match(scrubbed, /\[REDACTED_GITHUB_TOKEN\]/);
   assert.match(scrubbed, /\[REDACTED_API_KEY\]/);
   assert.match(scrubbed, /\[REDACTED_AWS_KEY\]/);
   assert.match(scrubbed, /\[REDACTED_SLACK_TOKEN\]/);
+  assert.match(scrubbed, /\[REDACTED_GOOGLE_API_KEY\]/);
+  assert.match(scrubbed, /\[REDACTED_GITLAB_TOKEN\]/);
+  assert.match(scrubbed, /\[REDACTED_NPM_TOKEN\]/);
+  assert.match(scrubbed, /\[REDACTED_PYPI_TOKEN\]/);
+  assert.match(scrubbed, /\[REDACTED_STRIPE_KEY\]/);
+  assert.match(scrubbed, /\[REDACTED_JWT\]/);
+  assert.match(scrubbed, /\[REDACTED_SLACK_WEBHOOK\]/);
+  assert.match(scrubbed, /\[REDACTED_CREDENTIAL\]/);
   assert.match(scrubbed, /Bearer \[REDACTED_TOKEN\]/);
   assert.match(scrubbed, /\[REDACTED_PRIVATE_KEY\]/);
+  assert.equal(
+    redactSecrets("This sentence contains no credentials and token=short."),
+    "This sentence contains no credentials and token=short.",
+  );
 
   const dir = tempDir(t);
   const kb = new KnowledgeBase(dir);
@@ -205,14 +252,32 @@ test("redactSecrets scrubs credentials and private keys across entry fields", (t
     date: "2026-11-09",
     title: `Rotated token ${ghToken}`,
     workspace: "~/code/scribe",
-    agent: "OpenCode",
+    agent: `OpenCode ${awsKey}`,
     category: "finding",
     body: `Replaced ${skToken} in config.`,
   });
 
   const [saved] = kb.readKnowledge("2026-11");
   assert.equal(saved.title, "Rotated token [REDACTED_GITHUB_TOKEN]");
+  assert.equal(saved.agent, "OpenCode [REDACTED_AWS_KEY]");
   assert.equal(saved.body, "Replaced [REDACTED_API_KEY] in config.");
+
+  kb.appendReminder({
+    date: "2026-11-09",
+    title: "Rotate credentials",
+    priority: "p1",
+    context: `Found ${gitlabToken} in the deployment notes.`,
+    action: `Replace ${googleKey} and ${npmToken}.`,
+  });
+  const [reminder] = kb.readReminders("2026-11");
+  assert.equal(
+    reminder.context,
+    "Found [REDACTED_GITLAB_TOKEN] in the deployment notes.",
+  );
+  assert.equal(
+    reminder.action,
+    "Replace [REDACTED_GOOGLE_API_KEY] and [REDACTED_NPM_TOKEN].",
+  );
 });
 
 test("Scribe.record deduplicates identical entries on the same date", async (t) => {

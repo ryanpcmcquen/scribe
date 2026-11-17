@@ -25,6 +25,7 @@ export {
 } from "./merge";
 export { buildContextPack, searchKnowledgeBase } from "./search";
 export { computeStats } from "./stats";
+export { verifyJournal } from "./verify";
 export {
   DEFAULT_AGENT,
   DEFAULT_WORKSPACE,
@@ -90,6 +91,7 @@ export type {
   SearchResultItem,
 } from "./search";
 export type { CountItem, ScribeStats, StatsOptions } from "./stats";
+export type { VerifyIssue, VerifyIssueKind, VerifyReport } from "./verify";
 export type { ConfigOverrides, ScribeConfig } from "./config";
 export type { JsonRpcRequest, JsonRpcResponse } from "./mcp";
 export type {

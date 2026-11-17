@@ -34,6 +34,10 @@ npm run build
 npm link
 ```
 
+The package artifact includes the five agent skill templates. `npm test`
+creates a package archive and verifies that the packaged CLI and
+`scribe hooks install --skills --all-agents` work from that archive.
+
 You can also run the built CLI directly:
 
 ```bash
@@ -73,6 +77,7 @@ Commands:
   search     Search across months over knowledge entries and reminders
   context    Build a compact context pack for a workspace or query
   stats      Show summary statistics across knowledge entries and reminders
+  verify     Audit journal structure and scan for likely secrets
   sync       Sync journal repo (commit local changes, pull --rebase, push)
   mcp        Start the Model Context Protocol (MCP) server on stdio
   hook       Run an automatic capture hook (post-commit, agent-stop)
@@ -196,6 +201,27 @@ any time:
 scribe sync --json
 ```
 
+The process lock coordinates Scribe processes on the same machine. For separate
+machines, Git's pull/rebase-and-push flow handles non-fast-forward updates;
+conflicts are reported rather than silently resolved.
+
+### Verify Existing Journal Data
+
+`scribe verify` is a read-only audit of monthly knowledge and reminder
+markdown. It checks entry headings, dates, required fields, categories,
+priorities, reminder status fields, and expected storage paths. It also scans
+for likely secrets without including the detected values in its output:
+
+```bash
+scribe verify
+scribe verify --json
+```
+
+The command exits with status `1` if it finds an issue. Secret detection is
+heuristic and only scans current journal files; it does not inspect or rewrite
+Git history. If a real credential was committed, rotate it and remove it from
+history separately.
+
 Capture options:
 
 | Option | Description |
@@ -215,10 +241,14 @@ Capture options:
 By default, capture writes the monthly file, commits to the journal repo, and
 pushes when a remote is configured. Offline or remote-less journals still
 commit locally; push is a no-op. Identical entries recorded on the same day are
-deduplicated automatically (`deduplicated: true`), home-directory paths are
-scrubbed to `~`, and common secret/token formats (`ghp_...`, `sk-...`, `AKIA...`,
-Slack `xox[baprs]-...`, `Bearer ...`, private key blocks) are automatically
-redacted before writing.
+deduplicated automatically (`deduplicated: true`). A per-journal process lock
+serializes capture, reminder updates, and sync operations on the same machine.
+Home-directory paths are scrubbed to `~`. Common GitHub/GitLab, OpenAI/Stripe,
+AWS, Google, npm/PyPI, and Slack tokens, JWTs, bearer values, credential
+assignments, URL passwords, and PEM private-key blocks are redacted before
+writing. Detection is heuristic, not a guarantee that every secret is caught;
+avoid sending credentials to Scribe and review captures before sharing the
+journal.
 
 ## Capture reliability (MCP, hooks, and OpenCode plugin)
 
@@ -303,7 +333,10 @@ scribe/
     config.ts
     date.ts
     index.ts
+    lock.ts
     scribe.ts
+    hooks/
+    stats/
     storage/
     git/
   test/
@@ -338,8 +371,10 @@ npm test
 
 ## Status
 
-CLI, config, storage, git commit/push, reminder lifecycle (`done`/`snooze`/`reopen`),
-cross-month search and context retrieval (`scribe search`, `scribe context`),
-capture skills, and capture reliability (`scribe mcp`, `scribe hook`/`scribe hooks`,
-OpenCode V2 plugin, idempotent deduplication, and home-path redaction) are
-implemented and tested.
+CLI, config, storage, git sync/rebase, reminder lifecycle (`done`/`snooze`/`reopen`),
+cross-month search/context, stats, recency-weighted focus, all-agent skill and
+multi-repo hook installers, MCP/hooks/OpenCode plugin capture reliability,
+deduplication, and heuristic secret/home-path redaction are implemented and
+tested, including the read-only `scribe verify` audit. CI covers typechecking,
+the test suite, and privacy checks. The package artifact is also smoke-tested
+to ensure skill templates ship with the CLI.

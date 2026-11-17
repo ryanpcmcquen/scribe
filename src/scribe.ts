@@ -1,5 +1,6 @@
 import { DEFAULT_WORKSPACE } from "./config";
 import { Git, SyncResult } from "./git";
+import { withWorkspaceLock } from "./lock";
 import {
   KnowledgeBase,
   KnowledgeEntry,
@@ -27,6 +28,7 @@ import {
   SearchResultItem,
 } from "./search";
 import { computeStats, ScribeStats, StatsOptions } from "./stats";
+import { verifyJournal, VerifyReport } from "./verify";
 
 export interface ScribeOptions {
   workspacePath?: string;
@@ -59,11 +61,13 @@ export class Scribe {
   readonly storage: KnowledgeBase;
   readonly git: Git;
 
+  private readonly workspacePath: string;
   private readonly autoCommit: boolean;
   private readonly autoPush: boolean;
 
   constructor(options: ScribeOptions) {
     const workspacePath = options.workspacePath ?? DEFAULT_WORKSPACE;
+    this.workspacePath = workspacePath;
     this.storage = new KnowledgeBase(workspacePath);
     this.git = new Git(options.repoPath ?? workspacePath, options.remote);
     this.autoCommit = options.autoCommit ?? true;
@@ -103,17 +107,16 @@ export class Scribe {
    * uncommitted local changes, pull with rebase/autostash, and push.
    */
   async sync(commitMessage?: string): Promise<SyncResult> {
-    return this.git.sync({
-      commitMessage,
-      autoCommit: this.autoCommit,
-      autoPush: this.autoPush,
-    });
+    return withWorkspaceLock(this.workspacePath, () =>
+      this.git.sync({
+        commitMessage,
+        autoCommit: this.autoCommit,
+        autoPush: this.autoPush,
+      }),
+    );
   }
 
-  /**
-   * Capture an entry: write to the knowledge/reminders store, commit, push.
-   */
-  async record(entry: ScribeEntry): Promise<CaptureResult> {
+  private async recordUnlocked(entry: ScribeEntry): Promise<CaptureResult> {
     const isDuplicate =
       "category" in entry
         ? this.storage.hasDuplicateKnowledge(entry)
@@ -144,12 +147,31 @@ export class Scribe {
   }
 
   /**
+   * Capture an entry: write to the knowledge/reminders store, commit, push.
+   */
+  async record(entry: ScribeEntry): Promise<CaptureResult> {
+    return withWorkspaceLock(this.workspacePath, () =>
+      this.recordUnlocked(entry),
+    );
+  }
+
+  /**
    * Transition a reminder's status (`done`, `snoozed`, or `pending`), commit, and push.
    */
   async updateReminderStatus(
     query: string,
     status: ReminderStatus,
     options: { month?: string; snoozedUntil?: string; completedAt?: string } = {},
+  ): Promise<ReminderUpdateResult> {
+    return withWorkspaceLock(this.workspacePath, () =>
+      this.updateReminderStatusUnlocked(query, status, options),
+    );
+  }
+
+  private async updateReminderStatusUnlocked(
+    query: string,
+    status: ReminderStatus,
+    options: { month?: string; snoozedUntil?: string; completedAt?: string },
   ): Promise<ReminderUpdateResult> {
     const { updated, path, month } = this.storage.updateReminderStatus(query, {
       status,
@@ -291,6 +313,13 @@ export class Scribe {
    */
   stats(options: StatsOptions = {}): ScribeStats {
     return computeStats(this.storage, options);
+  }
+
+  /**
+   * Read-only audit of journal structure and likely secret values.
+   */
+  verify(): VerifyReport {
+    return verifyJournal(this.workspacePath);
   }
 
   /**

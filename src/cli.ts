@@ -45,6 +45,7 @@ import {
   KnowledgeEntry,
   ReminderEntry,
   ReminderStatus,
+  redactSecrets,
   ScribeEntry,
 } from "./storage";
 
@@ -731,6 +732,41 @@ function commandStats(args: ParsedArgs, config: ScribeConfig): number {
   return 0;
 }
 
+function commandVerify(args: ParsedArgs, config: ScribeConfig): number {
+  const json = flagBool(args.flags, "json");
+  const scribe = new Scribe({
+    workspacePath: config.workspace,
+    autoCommit: false,
+    autoPush: false,
+  });
+  const report = scribe.verify();
+  const output = {
+    ...report,
+    workspace: redactSecrets(tildifyPath(report.workspace)),
+  };
+
+  if (json) {
+    printJson(output);
+  } else {
+    console.log(
+      `Scribe verify: ${report.filesScanned} files and ${report.entriesScanned} entries scanned.`,
+    );
+    console.log(
+      `  secrets: ${report.secretFindings}; malformed records: ${report.malformedFindings}`,
+    );
+    for (const issue of report.issues) {
+      console.log(
+        `  ${issue.path}:${issue.line} [${issue.kind}] ${issue.message}`,
+      );
+    }
+    if (report.ok) {
+      console.log("Journal verification passed.");
+    }
+  }
+
+  return report.ok ? 0 : 1;
+}
+
 async function commandFocus(
   args: ParsedArgs,
   config: ScribeConfig,
@@ -1152,6 +1188,7 @@ Commands:
   search     Search across months over knowledge entries and reminders
   context    Build a compact context pack for a workspace or query
   stats      Show summary statistics across knowledge entries and reminders
+  verify     Audit journal structure and scan for likely secrets
   sync       Sync journal repo (commit local changes, pull --rebase, push)
   mcp        Start the Model Context Protocol (MCP) server on stdio
   hook       Run an automatic capture hook (post-commit, agent-stop)
@@ -1225,6 +1262,8 @@ export async function main(argv: string[]): Promise<number> {
       return commandContext(args, config);
     case "stats":
       return commandStats(args, config);
+    case "verify":
+      return commandVerify(args, config);
     case "sync":
       return commandSync(args, config);
     case "mcp":

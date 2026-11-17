@@ -1,7 +1,8 @@
 # Scribe — Design Document
 
-> Status: implemented core + capture reliability + reminder lifecycle + search/context + Flint merge.
-> Updated on 2026-11-04.
+> Status: implemented core, capture reliability, reminder lifecycle, search/context,
+> Flint merge, sync/rebase, redaction, stats, packaging checks, and concurrency locking.
+> Updated on 2026-11-17.
 
 ## Purpose
 
@@ -52,6 +53,7 @@ Scribe ships a dependency-free Node CLI (`src/cli.ts`):
     scribe search [<query>] [--repo <path>] [--category <cat>] [--status <status>] [--limit <N>] [--json]
     scribe context [--repo <path>] [--query <text>] [--limit <N>] [--json]
     scribe stats [--month YYYY-MM] [--all] [--repo <path>] [--json]
+    scribe verify [--json]
     scribe sync [--message <msg>] [--no-commit] [--no-push] [--json]
     scribe mcp
     scribe hook <post-commit|agent-stop> [--repo <path>] [--stdin] [--json]
@@ -61,6 +63,16 @@ Scribe ships a dependency-free Node CLI (`src/cli.ts`):
 
 - Capture validates local dates, writes the monthly file, commits, and pushes when a remote
   exists. `--dry-run` validates without writing.
+- Capture, reminder updates, and sync are serialized by a per-journal process lock on the
+  current machine. Git rebase handles remote changes from other machines; conflicts fail
+  visibly without an automatic conflict resolution.
+- `npm pack` includes all capture-skill templates. The package test extracts the archive,
+  runs the CLI, and verifies that the all-agent skill installer can load the bundled files.
+- Storage sanitization redacts home-directory paths and common credential formats. Secret
+  detection is heuristic and is not a substitute for avoiding credentials in captured text.
+- `scribe verify` performs a read-only audit of monthly files for malformed records and
+  likely secrets. It does not expose matched secret values or rewrite files and does not
+  inspect Git history.
 - Config defaults to `~/.config/scribe/config.json` (XDG-aware) with `workspace`, `remote`,
   `agent`, `autoCommit`, and `autoPush` keys. Precedence is flags → environment → config →
   defaults.
@@ -184,13 +196,28 @@ Flint's morning brief / "Focus for today" synthesis merges multiple inputs:
 
 Flint produces a ranked focus list and overview from this merged input.
 
+## Implemented capabilities
+
+- Cross-month search and compact context retrieval.
+- Reminder lifecycle (`done`, `snooze`, `reopen`) and active-reminder focus integration.
+- Multi-source focus composition consumed by Flint's morning brief.
+- Multi-machine Git synchronization with rebase retry, plus local process locking to
+  serialize capture and journal updates.
+- Capture hooks, stdio MCP server, OpenCode plugin, all-agent skill installation, and
+  multi-repository hook scanning.
+- Monthly summary statistics and age-based focus score decay.
+- Read-only journal verification for malformed markdown records and likely secrets.
+- GitHub Actions CI, repository privacy/style checks, and npm package archive smoke tests.
+
 ## Open design questions
 
-- Search / context retrieval across months: ranking, filtering by workspace, and how much
-  context to hand to agents.
-- Reminder lifecycle: pending/done/snooze representation and how reminders enter focus.
-- Precedence/weighting rules when merging Scribe entries into Flint's focus.
+- Which additional secret formats should be recognized, and should installations be able
+  to supply custom redaction patterns?
+- Which agent skill locations should be supported as each agent's global-install
+  conventions evolve?
 
 ## Next steps
 
-- Optional UI / digest formatting enhancements as real-world journal volume grows.
+- Observe the package install and sync flows in regular use before adding more features.
+- Consider customizable redaction rules and audit results for previously committed history.
+- Keep the agent skill destination paths aligned with upstream agent conventions.
