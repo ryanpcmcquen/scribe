@@ -47,13 +47,15 @@ Scribe ships a dependency-free Node CLI (`src/cli.ts`):
     scribe capture --title <title> --category <category> --body <markdown>
     # JSON entry from stdin
     scribe capture --stdin
+    scribe import <path-or-url> [--format <format>] [--dry-run] [--json]
     scribe read [--month YYYY-MM] [--all] [--repo <path>] [--json]
     scribe reminders [done|snooze|reopen <query>] [--status pending|done|snoozed|all] [--pending] [--json]
     scribe focus [--month YYYY-MM] [--all] [--repo <path>] [--limit <N>] [--stdin] [--bullets] [--json]
     scribe search [<query>] [--repo <path>] [--category <cat>] [--status <status>] [--limit <N>] [--json]
     scribe context [--repo <path>] [--query <text>] [--limit <N>] [--json]
     scribe stats [--month YYYY-MM] [--all] [--repo <path>] [--json]
-    scribe verify [--json]
+    scribe verify [--history] [--json]
+    scribe catalog <build|search> [<query>] [--limit <N>] [--json]
     scribe sync [--message <msg>] [--no-commit] [--no-push] [--json]
     scribe mcp
     scribe hook <post-commit|agent-stop> [--repo <path>] [--stdin] [--json]
@@ -70,14 +72,25 @@ Scribe ships a dependency-free Node CLI (`src/cli.ts`):
   runs the CLI, and verifies that the all-agent skill installer can load the bundled files.
 - Storage sanitization redacts home-directory paths and common credential formats. Secret
   detection is heuristic and is not a substitute for avoiding credentials in captured text.
+- Configurable `redactionLiterals` apply exact, case-sensitive custom strings to new captures
+  and verification without evaluating user-supplied regular expressions.
 - `scribe verify` performs a read-only audit of monthly files for malformed records and
-  likely secrets. It does not expose matched secret values or rewrite files and does not
-  inspect Git history.
+  likely secrets. `--history` also checks journal files in commits reachable from local Git
+  refs. It does not expose matched secret values or rewrite files or history.
+- `scribe import` normalizes Markdown/Obsidian, JSON/JSONL, text, HTML, Git history, and
+  HTTP(S) sources locally. It retains provenance, deduplicates unchanged source records, and
+  batches writes into a single commit/push.
+- The local AI catalog is generated without model/API calls. It uses extractive summaries and
+  automatically derived keyword tags, refreshes changed months incrementally after captures,
+  and returns compact search results with links to canonical Markdown.
 - Config defaults to `~/.config/scribe/config.json` (XDG-aware) with `workspace`, `remote`,
   `agent`, `autoCommit`, and `autoPush` keys. Precedence is flags → environment → config →
   defaults.
 - Environment overrides: `SCRIBE_CONFIG`, `SCRIBE_WORKSPACE`, `SCRIBE_REMOTE`,
-  `SCRIBE_AGENT`, `SCRIBE_AUTO_COMMIT`, `SCRIBE_AUTO_PUSH`.
+  `SCRIBE_AGENT`, `SCRIBE_AUTO_COMMIT`, `SCRIBE_AUTO_PUSH`, and
+  `SCRIBE_REDACTION_LITERALS`.
+- URL imports can read optional request headers from `SCRIBE_IMPORT_HEADERS`; those credentials
+  are never written to the journal or catalog.
 - `scribe doctor` checks workspace existence, repository root, remotes, and config presence.
 - The test suite covers date validation, config precedence, storage round-trips, CLI
   init/capture/read/reminders/focus/doctor, JSON stdin, dry-run, and commit behavior.
@@ -204,20 +217,23 @@ Flint produces a ranked focus list and overview from this merged input.
 - Multi-machine Git synchronization with rebase retry, plus local process locking to
   serialize capture and journal updates.
 - Capture hooks, stdio MCP server, OpenCode plugin, all-agent skill installation, and
-  multi-repository hook scanning.
+  multi-repository hook scanning, with verified global paths for the five supported agents.
 - Monthly summary statistics and age-based focus score decay.
 - Read-only journal verification for malformed markdown records and likely secrets.
+- Reachable Git history scanning and configurable exact-literal redaction.
+- Multi-format knowledge import and a local, incrementally refreshed AI retrieval catalog.
+- Verified global skill destinations for OpenCode, Claude Code, Codex, Cline, and Antigravity.
 - GitHub Actions CI, repository privacy/style checks, and npm package archive smoke tests.
 
 ## Open design questions
 
-- Which additional secret formats should be recognized, and should installations be able
-  to supply custom redaction patterns?
-- Which agent skill locations should be supported as each agent's global-install
-  conventions evolve?
+- How should automatic local tags balance precision and recall while staying useful across
+  different workspaces and writing styles?
 
 ## Next steps
 
 - Observe the package install and sync flows in regular use before adding more features.
-- Consider customizable redaction rules and audit results for previously committed history.
-- Keep the agent skill destination paths aligned with upstream agent conventions.
+- Add a token-budget option to `scribe context` and include entry-level source references.
+- Expand import adapters only when actual source formats require more than the current generic
+  Markdown, structured-data, HTML, Git, and URL readers.
+- Periodically recheck agent skill destination paths against upstream conventions.

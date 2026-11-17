@@ -11,6 +11,8 @@ const {
 } = require("../dist/plugins/opencode.js");
 const {
   ALL_SKILL_AGENTS,
+  agentSkillPathForAgent,
+  agentSkillStatuses,
   installAgentSkills,
 } = require("../dist/hooks/index.js");
 const { parseJson, runCli, tempDir } = require("./helpers");
@@ -200,6 +202,30 @@ test("installAgentSkills installs skill templates for all five supported agents"
   const homeDir = `${dir}/home`;
   const configHome = `${dir}/config`;
 
+  assert.equal(
+    agentSkillPathForAgent("opencode", homeDir, configHome),
+    `${configHome}/opencode/skills/scribe-capture/SKILL.md`,
+  );
+  assert.equal(
+    agentSkillPathForAgent("claude-code", homeDir, configHome),
+    `${homeDir}/.claude/skills/scribe-capture/SKILL.md`,
+  );
+  assert.equal(
+    agentSkillPathForAgent("codex", homeDir, configHome),
+    `${homeDir}/.agents/skills/scribe-capture/SKILL.md`,
+  );
+  assert.equal(
+    agentSkillPathForAgent("cline", homeDir, configHome),
+    `${homeDir}/.cline/skills/scribe-capture/SKILL.md`,
+  );
+  assert.equal(
+    agentSkillPathForAgent("antigravity", homeDir, configHome),
+    `${homeDir}/.gemini/config/skills/scribe-capture/SKILL.md`,
+  );
+
+  const beforeInstall = agentSkillStatuses({ homeDir, configHome });
+  assert.ok(beforeInstall.every((item) => item.installed === false));
+
   const results = installAgentSkills({ homeDir, configHome });
   assert.equal(results.length, ALL_SKILL_AGENTS.length);
   for (const item of results) {
@@ -207,6 +233,22 @@ test("installAgentSkills installs skill templates for all five supported agents"
     assert.ok(existsSync(item.skillPath));
     assert.match(readFileSync(item.skillPath, "utf8"), /scribe capture/);
   }
+  assert.ok(
+    agentSkillStatuses({ homeDir, configHome }).every(
+      (item) => item.installed === true,
+    ),
+  );
+
+  const status = parseJson(
+    runCli(["hooks", "status", "--skills", "--json"], {
+      env: { XDG_CONFIG_HOME: configHome },
+    }),
+  );
+  assert.deepEqual(
+    status.agentSkills.map((item) => item.agent),
+    ["opencode"],
+  );
+  assert.ok(status.agentSkills.every((item) => item.installed === true));
 });
 
 test("createOpenCodePlugin registers tools and injects context directive", async (t) => {

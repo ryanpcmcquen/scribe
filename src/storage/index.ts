@@ -26,9 +26,12 @@ export function redactHomePaths(text: string, home: string = homedir()): string 
  * Scrub common secret and credential formats before writing entries to disk
  * so tokens or private keys are never committed to the journal repository.
  */
-export function redactSecrets(text: string): string {
+export function redactSecrets(
+  text: string,
+  redactionLiterals: readonly string[] = [],
+): string {
   if (!text) return text;
-  return text
+  let redacted = text
     .replace(
       /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
       "[REDACTED_PRIVATE_KEY]",
@@ -65,10 +68,20 @@ export function redactSecrets(text: string): string {
     )
     .replace(/(:\/\/[^:/\s]+:)[^@/\s]+@/g, "$1[REDACTED_CREDENTIAL]@")
     .replace(/(\bBearer\s+)[A-Za-z0-9._~+/=-]{16,}/gi, "$1[REDACTED_TOKEN]");
+
+  for (const literal of redactionLiterals) {
+    if (literal) {
+      redacted = redacted.split(literal).join("[REDACTED_CUSTOM]");
+    }
+  }
+  return redacted;
 }
 
-function sanitizeText(text: string): string {
-  return redactSecrets(redactHomePaths(text)).trim();
+function sanitizeText(
+  text: string,
+  redactionLiterals: readonly string[],
+): string {
+  return redactSecrets(redactHomePaths(text), redactionLiterals).trim();
 }
 
 export interface KnowledgeEntry {
@@ -79,6 +92,10 @@ export interface KnowledgeEntry {
   agent: string;
   category: "finding" | "decision" | "work-log";
   body: string;
+  source?: string;
+  sourceId?: string;
+  summary?: string;
+  tags?: string[];
 }
 
 export type ReminderStatus = "pending" | "done" | "snoozed";
@@ -140,7 +157,10 @@ export type ScribeEntry = KnowledgeEntry | ReminderEntry;
 export type EntryKind = "knowledge" | "reminders";
 
 export class KnowledgeBase {
-  constructor(private readonly workspacePath: string) {}
+  constructor(
+    private readonly workspacePath: string,
+    private readonly redactionLiterals: readonly string[] = [],
+  ) {}
 
   private knowledgePath(month: string): string {
     return `${this.workspacePath}/knowledge/${month}/${month}-knowledge.md`;
@@ -168,19 +188,35 @@ export class KnowledgeBase {
   sanitizeKnowledgeEntry(entry: KnowledgeEntry): KnowledgeEntry {
     return {
       ...entry,
-      title: sanitizeText(entry.title),
-      workspace: sanitizeText(entry.workspace),
-      agent: sanitizeText(entry.agent),
-      body: sanitizeText(entry.body),
+      title: sanitizeText(entry.title, this.redactionLiterals),
+      workspace: sanitizeText(entry.workspace, this.redactionLiterals),
+      agent: sanitizeText(entry.agent, this.redactionLiterals),
+      body: sanitizeText(entry.body, this.redactionLiterals),
+      ...(entry.source
+        ? { source: sanitizeText(entry.source, this.redactionLiterals) }
+        : {}),
+      ...(entry.sourceId
+        ? { sourceId: sanitizeText(entry.sourceId, this.redactionLiterals) }
+        : {}),
+      ...(entry.summary
+        ? { summary: sanitizeText(entry.summary, this.redactionLiterals) }
+        : {}),
+      ...(entry.tags?.length
+        ? {
+            tags: entry.tags.map((tag) =>
+              sanitizeText(tag, this.redactionLiterals),
+            ),
+          }
+        : {}),
     };
   }
 
   sanitizeReminderEntry(entry: ReminderEntry): ReminderEntry {
     return {
       ...entry,
-      title: sanitizeText(entry.title),
-      context: sanitizeText(entry.context),
-      action: sanitizeText(entry.action),
+      title: sanitizeText(entry.title, this.redactionLiterals),
+      context: sanitizeText(entry.context, this.redactionLiterals),
+      action: sanitizeText(entry.action, this.redactionLiterals),
     };
   }
 
@@ -190,11 +226,15 @@ export class KnowledgeBase {
     const existing = this.readKnowledge(month);
     return existing.some(
       (candidate) =>
-        candidate.date === sanitized.date &&
-        candidate.title.toLowerCase() === sanitized.title.toLowerCase() &&
-        candidate.workspace === sanitized.workspace &&
-        candidate.category === sanitized.category &&
-        candidate.body === sanitized.body,
+        (sanitized.sourceId &&
+          candidate.sourceId === sanitized.sourceId &&
+          candidate.title.toLowerCase() === sanitized.title.toLowerCase() &&
+          candidate.body === sanitized.body) ||
+        (candidate.date === sanitized.date &&
+          candidate.title.toLowerCase() === sanitized.title.toLowerCase() &&
+          candidate.workspace === sanitized.workspace &&
+          candidate.category === sanitized.category &&
+          candidate.body === sanitized.body),
     );
   }
 
@@ -217,7 +257,18 @@ export class KnowledgeBase {
     const month = sanitized.date.slice(0, 7);
     const filePath = this.knowledgePath(month);
     this.ensureFile(filePath, month);
-    const entryBlock = `\n### ${sanitized.date} — ${sanitized.title}\n\n- **Workspace:** ${sanitized.workspace}\n- **Agent:** ${sanitized.agent}\n- **Category:** ${sanitized.category}\n\n${sanitized.body}\n`;
+    const metadata = [
+      `- **Workspace:** ${sanitized.workspace}`,
+      `- **Agent:** ${sanitized.agent}`,
+      `- **Category:** ${sanitized.category}`,
+      ...(sanitized.source ? [`- **Source:** ${sanitized.source}`] : []),
+      ...(sanitized.sourceId ? [`- **Source ID:** ${sanitized.sourceId}`] : []),
+      ...(sanitized.summary ? [`- **Summary:** ${sanitized.summary}`] : []),
+      ...(sanitized.tags?.length
+        ? [`- **Tags:** ${sanitized.tags.join(", ")}`]
+        : []),
+    ];
+    const entryBlock = `\n### ${sanitized.date} — ${sanitized.title}\n\n${metadata.join("\n")}\n\n${sanitized.body}\n`;
     appendFileSync(filePath, entryBlock);
     return filePath;
   }
@@ -261,30 +312,39 @@ export class KnowledgeBase {
 
     const content = readFileSync(filePath, "utf8");
     const entries: KnowledgeEntry[] = [];
-    const blocks = content.split(/^### /m).slice(1);
+    const blocks = content
+      .split(/(?=^### \d{4}-\d{2}-\d{2} — .+$)/m)
+      .slice(1);
 
     for (const block of blocks) {
       const header = block.split("\n")[0] ?? "";
-      const match = header.match(/^(\d{4}-\d{2}-\d{2}) — (.+)$/);
+      const match = header.match(/^### (\d{4}-\d{2}-\d{2}) — (.+)$/);
       if (!match) continue;
 
       const date = match[1];
       const title = match[2];
       const fields: Record<string, string> = {};
       const bodyLines: string[] = [];
+      let metadataEnded = false;
+      let sawMetadata = false;
 
       const lines = block.split("\n");
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i];
-        if (/^### /.test(line)) {
-          break;
+        if (!metadataEnded && !line.trim()) {
+          if (sawMetadata) metadataEnded = true;
+          continue;
         }
-        const fieldMatch = line.match(/^-\s+\*\*(.+?)\*\*\s*:?\s*(.*)$/);
+        const fieldMatch = !metadataEnded
+          ? line.match(/^-\s+\*\*(.+?)\*\*\s*:?\s*(.*)$/)
+          : null;
         if (fieldMatch) {
           fields[fieldMatch[1].replace(/:$/, "").trim()] = fieldMatch[2].trim();
-        } else {
-          bodyLines.push(line);
+          sawMetadata = true;
+          continue;
         }
+        metadataEnded = true;
+        bodyLines.push(line);
       }
 
       entries.push({
@@ -294,6 +354,17 @@ export class KnowledgeBase {
         agent: fields["Agent"] ?? "",
         category: (fields["Category"] ?? "work-log") as KnowledgeEntry["category"],
         body: bodyLines.join("\n").trim(),
+        ...(fields["Source"] ? { source: fields["Source"] } : {}),
+        ...(fields["Source ID"] ? { sourceId: fields["Source ID"] } : {}),
+        ...(fields["Summary"] ? { summary: fields["Summary"] } : {}),
+        ...(fields["Tags"]
+          ? {
+              tags: fields["Tags"]
+                .split(",")
+                .map((tag) => tag.trim())
+                .filter(Boolean),
+            }
+          : {}),
       });
     }
 
@@ -306,30 +377,39 @@ export class KnowledgeBase {
 
     const content = readFileSync(filePath, "utf8");
     const entries: ReminderEntry[] = [];
-    const blocks = content.split(/^### /m).slice(1);
+    const blocks = content
+      .split(/(?=^### \d{4}-\d{2}-\d{2} — .+$)/m)
+      .slice(1);
 
     for (const block of blocks) {
       const header = block.split("\n")[0] ?? "";
-      const match = header.match(/^(\d{4}-\d{2}-\d{2}) — (.+)$/);
+      const match = header.match(/^### (\d{4}-\d{2}-\d{2}) — (.+)$/);
       if (!match) continue;
 
       const date = match[1];
       const title = match[2];
       const fields: Record<string, string> = {};
       const actionLines: string[] = [];
+      let metadataEnded = false;
+      let sawMetadata = false;
 
       const lines = block.split("\n");
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i];
-        if (/^### /.test(line)) {
-          break;
+        if (!metadataEnded && !line.trim()) {
+          if (sawMetadata) metadataEnded = true;
+          continue;
         }
-        const fieldMatch = line.match(/^-\s+\*\*(.+?)\*\*\s*:?\s*(.*)$/);
+        const fieldMatch = !metadataEnded
+          ? line.match(/^-\s+\*\*(.+?)\*\*\s*:?\s*(.*)$/)
+          : null;
         if (fieldMatch) {
           fields[fieldMatch[1].replace(/:$/, "").trim()] = fieldMatch[2].trim();
-        } else {
-          actionLines.push(line);
+          sawMetadata = true;
+          continue;
         }
+        metadataEnded = true;
+        actionLines.push(line);
       }
 
       const rawStatus = fields["Status"];

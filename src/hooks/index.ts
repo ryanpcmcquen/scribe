@@ -152,6 +152,7 @@ export async function runPostCommitHook(
     remote: config.remote,
     autoCommit: config.autoCommit,
     autoPush: config.autoPush,
+    redactionLiterals: config.redactionLiterals,
   });
 
   const existing = scribe.readKnowledge(month);
@@ -214,13 +215,14 @@ export async function runPostCommitHook(
     body: bodyParts.join("\n\n"),
   };
 
-  const result = await scribe.record(entry);
+  const sanitizedEntry = scribe.storage.sanitizeKnowledgeEntry(entry);
+  const result = await scribe.record(sanitizedEntry);
   return {
     ok: true,
     skipped: Boolean(result.deduplicated),
     ...(result.deduplicated ? { reason: "duplicate entry" } : {}),
     sha: shortSha,
-    entry,
+    entry: sanitizedEntry,
     ...result,
   };
 }
@@ -266,6 +268,7 @@ export async function runAgentStopHook(
       remote: config.remote,
       autoCommit: config.autoCommit,
       autoPush: config.autoPush,
+      redactionLiterals: config.redactionLiterals,
     });
 
     const entry: KnowledgeEntry = {
@@ -277,12 +280,13 @@ export async function runAgentStopHook(
       body,
     };
 
-    const result = await scribe.record(entry);
+    const sanitizedEntry = scribe.storage.sanitizeKnowledgeEntry(entry);
+    const result = await scribe.record(sanitizedEntry);
     return {
       ok: true,
       skipped: Boolean(result.deduplicated),
       ...(result.deduplicated ? { reason: "duplicate entry" } : {}),
-      entry,
+      entry: sanitizedEntry,
       ...result,
     };
   }
@@ -530,7 +534,7 @@ export interface AgentSkillInstallResult {
   skillPath: string;
 }
 
-function targetSkillPathForAgent(
+export function agentSkillPathForAgent(
   agent: AgentSkillTarget,
   homeDir: string,
   configHome: string,
@@ -555,7 +559,7 @@ function targetSkillPathForAgent(
     case "codex":
       return join(
         resolvePath(homeDir),
-        ".codex",
+        ".agents",
         "skills",
         "scribe-capture",
         "SKILL.md",
@@ -571,7 +575,8 @@ function targetSkillPathForAgent(
     case "antigravity":
       return join(
         resolvePath(homeDir),
-        ".antigravity",
+        ".gemini",
+        "config",
         "skills",
         "scribe-capture",
         "SKILL.md",
@@ -605,13 +610,37 @@ export function installAgentSkills(
     if (!existsSync(sourceSkill)) {
       throw new Error(`Skill template for ${agent} not found at ${sourceSkill}`);
     }
-    const targetSkill = targetSkillPathForAgent(agent, homeDir, configHome);
+    const targetSkill = agentSkillPathForAgent(agent, homeDir, configHome);
     mkdirSync(dirname(targetSkill), { recursive: true });
     writeFileSync(targetSkill, readFileSync(sourceSkill, "utf8"));
     return {
       agent,
       installed: true,
       skillPath: targetSkill,
+    };
+  });
+}
+
+export function agentSkillStatuses(
+  options: {
+    agents?: AgentSkillTarget[];
+    homeDir?: string;
+    configHome?: string;
+  } = {},
+): AgentSkillInstallResult[] {
+  const homeDir = options.homeDir ?? homedir();
+  const configHome =
+    options.configHome ??
+    process.env.XDG_CONFIG_HOME ??
+    join(homeDir, ".config");
+  const agents = options.agents ?? ALL_SKILL_AGENTS;
+
+  return agents.map((agent) => {
+    const skillPath = agentSkillPathForAgent(agent, homeDir, configHome);
+    return {
+      agent,
+      installed: existsSync(skillPath),
+      skillPath,
     };
   });
 }

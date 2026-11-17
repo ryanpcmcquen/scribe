@@ -14,6 +14,7 @@ test("ScribeMcpServer lists tools, captures entries, and reads resources", async
     agent: "OpenCode",
     autoCommit: false,
     autoPush: false,
+    redactionLiterals: ["ORG_PRIVATE_VALUE"],
   });
 
   const initRes = await server.handleRequest({
@@ -51,13 +52,18 @@ test("ScribeMcpServer lists tools, captures entries, and reads resources", async
         title: "MCP capture works",
         category: "decision",
         workspace: `${dir}/project`,
-        body: "Captured over MCP.",
+        body: "Captured over MCP with ORG_PRIVATE_VALUE.",
       },
     },
   });
   const capturedPayload = JSON.parse(captureRes.result.content[0].text);
   assert.equal(capturedPayload.ok, true);
   assert.equal(capturedPayload.entry.title, "MCP capture works");
+  assert.equal(
+    capturedPayload.entry.body,
+    "Captured over MCP with [REDACTED_CUSTOM].",
+  );
+  assert.doesNotMatch(captureRes.result.content[0].text, /ORG_PRIVATE_VALUE/);
 
   const readRes = await server.handleRequest({
     jsonrpc: "2.0",

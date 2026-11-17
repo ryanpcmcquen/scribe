@@ -71,6 +71,7 @@ scribe <command> [options]
 Commands:
   init       Initialize the journal, config, and optional git repo
   capture    Capture a knowledge entry or reminder
+  import     Import Markdown, JSON, text, HTML, Git history, or web pages
   read       Read knowledge entries
   reminders  Read or update reminders (done, snooze, reopen)
   focus      Rank knowledge entries and pending reminders for a focus list
@@ -78,6 +79,7 @@ Commands:
   context    Build a compact context pack for a workspace or query
   stats      Show summary statistics across knowledge entries and reminders
   verify     Audit journal structure and scan for likely secrets
+  catalog    Build or search the local AI retrieval catalog
   sync       Sync journal repo (commit local changes, pull --rebase, push)
   mcp        Start the Model Context Protocol (MCP) server on stdio
   hook       Run an automatic capture hook (post-commit, agent-stop)
@@ -150,6 +152,52 @@ Active pending reminders (including snoozed reminders whose snooze date has
 arrived) enter `scribe focus` ranked by priority (`p1` → score `4`, `p2` → `3`,
 `p3` → `2`), while `done` and future-`snoozed` reminders are excluded.
 
+### Import Knowledge Locally
+
+`scribe import` adapts local Markdown/Obsidian, JSON, JSONL, plain text, HTML,
+Git history, and HTTP(S) pages into Scribe knowledge entries. It parses and
+normalizes locally without model/API calls, preserves source references, and
+stores source IDs so repeat imports of unchanged content are skipped. A batch
+is committed and pushed once, not once per imported item.
+
+```bash
+scribe import ~/notes/old-knowledge --dry-run
+scribe import ~/notes/old-knowledge --json
+scribe import ~/exports/confluence.json
+scribe import ~/code/legacy-project --format git --since 2026-01-01 --limit 100
+scribe import https://docs.example.org/guide --dry-run
+```
+
+Markdown frontmatter fields `title`, `date`, `workspace`, `agent`, `category`,
+`tags`, and `summary` are used when present. JSON records accept common fields
+such as `title`, `date`, `body`, `content`, `workspace`, `category`, and `tags`;
+Confluence REST JSON page responses are supported.
+
+URL import accepts HTML, JSON, and text responses, follows a limited number of
+redirects, and enforces response size limits. Private-network destinations are
+blocked by default; use `--allow-private-network` only for a trusted internal
+URL. Custom request headers can be supplied through `SCRIBE_IMPORT_HEADERS` as
+a JSON object. Keep credentials in a secret manager or environment, never in
+Scribe config or command-line arguments.
+
+### Local AI Catalog
+
+`scribe catalog build` creates a local, rebuildable metadata cache outside the
+journal. It derives short extractive summaries and automatic keyword tags from
+Markdown without AI calls. The first build scans the journal; later builds
+reuse unchanged monthly files, and successful captures refresh the changed
+month when a catalog already exists.
+
+```bash
+scribe catalog build
+scribe catalog build --force
+scribe catalog search "concurrent journal sync" --limit 5
+```
+
+Catalog search returns compact summaries, tags, and source paths, not full note
+bodies. Markdown remains canonical and the cache can be regenerated at any
+time.
+
 ### Search & Context Retrieval
 
 Search across all months over both knowledge entries and reminders:
@@ -215,12 +263,14 @@ for likely secrets without including the detected values in its output:
 ```bash
 scribe verify
 scribe verify --json
+scribe verify --history
 ```
 
-The command exits with status `1` if it finds an issue. Secret detection is
-heuristic and only scans current journal files; it does not inspect or rewrite
-Git history. If a real credential was committed, rotate it and remove it from
-history separately.
+`--history` also scans journal markdown in commits reachable from local Git
+refs; fetch remotes first to include their current branches. The command exits
+with status `1` if it finds an issue. Verification is read-only and never
+rewrites files or history. If a real credential was committed, rotate it and
+remove it from history separately.
 
 Capture options:
 
@@ -246,9 +296,11 @@ serializes capture, reminder updates, and sync operations on the same machine.
 Home-directory paths are scrubbed to `~`. Common GitHub/GitLab, OpenAI/Stripe,
 AWS, Google, npm/PyPI, and Slack tokens, JWTs, bearer values, credential
 assignments, URL passwords, and PEM private-key blocks are redacted before
-writing. Detection is heuristic, not a guarantee that every secret is caught;
-avoid sending credentials to Scribe and review captures before sharing the
-journal.
+writing. Optional `redactionLiterals` in config add exact, case-sensitive
+strings to scrub; they are applied to new captures and verification without
+being printed by `scribe config`. Detection is heuristic, not a guarantee that
+every secret is caught; avoid sending credentials to Scribe and review captures
+before sharing the journal.
 
 ## Capture reliability (MCP, hooks, and OpenCode plugin)
 
@@ -272,10 +324,15 @@ automatic mechanisms on top of the skills:
      automatically skipping the Scribe journal workspace.
    - `scribe hook agent-stop --stdin` accepts agent stop-hook JSON payloads (or
      falls back to capturing today's latest commit in the workspace).
-   - `scribe hooks install --skills` syncs the OpenCode capture skill into
-     `~/.config/opencode/skills/scribe-capture/SKILL.md`; add `--all-agents` to
-     sync skill templates for OpenCode, Claude Code, Codex, Cline, and
-     Antigravity at once.
+    - `scribe hooks install --skills` syncs the OpenCode capture skill into
+      `~/.config/opencode/skills/scribe-capture/SKILL.md`; add `--all-agents` to
+      sync skill templates for OpenCode, Claude Code, Codex, Cline, and
+      Antigravity at once.
+    - `scribe hooks status --skills --all-agents` checks the five global skill
+      destinations without printing skill contents.
+    - Global locations: OpenCode `~/.config/opencode/skills/`, Claude Code
+      `~/.claude/skills/`, Codex `~/.agents/skills/`, Cline `~/.cline/skills/`,
+      and Antigravity `~/.gemini/config/skills/`.
 3. **OpenCode V2 server plugin (`dist/plugins/opencode.js`)** — registers the
    four Scribe tools natively, injects the Scribe capture directive into
    session context hooks so the model never forgets to record findings and
@@ -292,13 +349,16 @@ Default config path: `~/.config/scribe/config.json` (respects
   "remote": "origin",
   "agent": "OpenCode",
   "autoCommit": true,
-  "autoPush": true
+  "autoPush": true,
+  "redactionLiterals": ["ORG_PRIVATE_PREFIX_"]
 }
 ```
 
 `remote` is optional. When omitted, Scribe uses `origin` if present, otherwise
 the first configured remote. Repository paths are stored with `~/` rather than
-an absolute home path.
+an absolute home path. `redactionLiterals` is an optional array of exact,
+case-sensitive strings (up to 100 values, 256 characters each). Values are
+stored in your local Scribe config and are not shown by `scribe config`.
 
 Environment overrides (highest priority after command-line flags):
 
@@ -310,6 +370,9 @@ Environment overrides (highest priority after command-line flags):
 | `SCRIBE_AGENT` | Default agent label |
 | `SCRIBE_AUTO_COMMIT` | `true`/`false` |
 | `SCRIBE_AUTO_PUSH` | `true`/`false` |
+| `SCRIBE_REDACTION_LITERALS` | JSON array of exact strings |
+| `SCRIBE_IMPORT_HEADERS` | JSON object of HTTP headers for URL imports |
+| `SCRIBE_IMPORT_HEADERS` | JSON object of HTTP headers for URL imports |
 
 Precedence: command-line flags → environment → config file → defaults.
 
@@ -330,12 +393,15 @@ scribe/
     antigravity/scribe-capture.md
   src/
     cli.ts
+    catalog/
     config.ts
     date.ts
+    import/
     index.ts
     lock.ts
     scribe.ts
     hooks/
+    verify/
     stats/
     storage/
     git/
@@ -372,9 +438,10 @@ npm test
 ## Status
 
 CLI, config, storage, git sync/rebase, reminder lifecycle (`done`/`snooze`/`reopen`),
-cross-month search/context, stats, recency-weighted focus, all-agent skill and
-multi-repo hook installers, MCP/hooks/OpenCode plugin capture reliability,
-deduplication, and heuristic secret/home-path redaction are implemented and
-tested, including the read-only `scribe verify` audit. CI covers typechecking,
-the test suite, and privacy checks. The package artifact is also smoke-tested
-to ensure skill templates ship with the CLI.
+multi-format import, a local automatic-summary/keyword catalog, cross-month
+search/context, stats, recency-weighted focus, all-agent skill and multi-repo
+hook installers, MCP/hooks/OpenCode plugin capture reliability, deduplication,
+and heuristic secret/home-path redaction are implemented and tested.
+`scribe verify` audits current files and reachable Git history. CI covers typechecking,
+the test suite, and privacy checks; the package artifact is smoke-tested to
+ensure skill templates ship with the CLI.

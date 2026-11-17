@@ -37,6 +37,7 @@ test("saveConfig round-trips through loadConfig", (t) => {
       agent: "OpenCode",
       autoCommit: false,
       autoPush: false,
+      redactionLiterals: ["company-secret-prefix-"],
     },
     configPath,
   );
@@ -48,6 +49,7 @@ test("saveConfig round-trips through loadConfig", (t) => {
     agent: "OpenCode",
     autoCommit: false,
     autoPush: false,
+    redactionLiterals: ["company-secret-prefix-"],
   });
 });
 
@@ -70,12 +72,16 @@ test("environment overrides file config", (t) => {
     process.env.SCRIBE_AGENT = "env-agent";
     process.env.SCRIBE_AUTO_COMMIT = "false";
     process.env.SCRIBE_AUTO_PUSH = "no";
+    process.env.SCRIBE_REDACTION_LITERALS = JSON.stringify([
+      "team-private-token-",
+    ]);
 
     const config = loadConfig({ configPath });
     assert.equal(config.workspace, `${dir}/env-journal`);
     assert.equal(config.agent, "env-agent");
     assert.equal(config.autoCommit, false);
     assert.equal(config.autoPush, false);
+    assert.deepEqual(config.redactionLiterals, ["team-private-token-"]);
   } finally {
     for (const key of Object.keys(process.env)) {
       if (!(key in previous)) delete process.env[key];
@@ -95,12 +101,23 @@ test("path helpers expand and tildify home", () => {
 test("cli config reports resolved config as JSON", (t) => {
   const dir = tempDir(t);
   const configPath = `${dir}/config.json`;
+  const literal = "do-not-print-this-redaction-literal";
 
   const init = runCli(
     ["init", "--workspace", `${dir}/journal`, "--no-git", "--json"],
     { env: { SCRIBE_CONFIG: configPath } },
   );
   assert.equal(init.status, 0, init.stderr);
+  saveConfig(
+    {
+      workspace: `${dir}/journal`,
+      agent: "scribe",
+      autoCommit: true,
+      autoPush: true,
+      redactionLiterals: [literal],
+    },
+    configPath,
+  );
 
   const result = runCli(["config", "--json"], {
     env: { SCRIBE_CONFIG: configPath },
@@ -111,6 +128,24 @@ test("cli config reports resolved config as JSON", (t) => {
   assert.equal(output.ok, true);
   assert.equal(output.configPath, configPath);
   assert.equal(output.config.workspace, `${dir}/journal`);
+  assert.equal(output.config.redactionLiteralsConfigured, 1);
+  assert.doesNotMatch(result.stdout, new RegExp(literal));
+});
+
+test("loadConfig rejects invalid custom redaction literals", (t) => {
+  const dir = tempDir(t);
+  const configPath = `${dir}/config.json`;
+  const previous = process.env.SCRIBE_REDACTION_LITERALS;
+  try {
+    process.env.SCRIBE_REDACTION_LITERALS = JSON.stringify([""]);
+    assert.throws(
+      () => loadConfig({ configPath }),
+      /redaction literal must be 1-256 characters/,
+    );
+  } finally {
+    if (previous === undefined) delete process.env.SCRIBE_REDACTION_LITERALS;
+    else process.env.SCRIBE_REDACTION_LITERALS = previous;
+  }
 });
 
 test("defaultConfigPath honors XDG_CONFIG_HOME", (t) => {

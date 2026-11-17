@@ -342,6 +342,7 @@ export class ScribeMcpServer {
       remote: config.remote,
       autoCommit: readOnly ? false : config.autoCommit,
       autoPush: readOnly ? false : config.autoPush,
+      redactionLiterals: config.redactionLiterals,
     });
   }
 
@@ -460,12 +461,20 @@ export class ScribeMcpServer {
         case "scribe_capture": {
           const entry = buildMcpEntry(args, config);
           const scribe = this.createScribe(config, false);
-          const result = await scribe.record(entry);
+          const sanitizedEntry =
+            "category" in entry
+              ? scribe.storage.sanitizeKnowledgeEntry(entry)
+              : scribe.storage.sanitizeReminderEntry(entry);
+          const result = await scribe.record(sanitizedEntry);
           return {
             content: [
               {
                 type: "text",
-                text: JSON.stringify({ ok: true, entry, ...result }, null, 2),
+                text: JSON.stringify(
+                  { ok: true, entry: sanitizedEntry, ...result },
+                  null,
+                  2,
+                ),
               },
             ],
           };

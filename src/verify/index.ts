@@ -1,3 +1,4 @@
+import { execFileSync } from "child_process";
 import {
   existsSync,
   readdirSync,
@@ -15,6 +16,12 @@ export interface VerifyIssue {
   path: string;
   line: number;
   message: string;
+  commit?: string;
+}
+
+export interface VerifyOptions {
+  history?: boolean;
+  redactionLiterals?: readonly string[];
 }
 
 export interface VerifyReport {
@@ -22,6 +29,8 @@ export interface VerifyReport {
   workspace: string;
   filesScanned: number;
   entriesScanned: number;
+  historyCommitsScanned: number;
+  historyFilesScanned: number;
   secretFindings: number;
   malformedFindings: number;
   issues: VerifyIssue[];
@@ -39,14 +48,17 @@ const PRIVATE_KEY_BEGIN = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/;
 const PRIVATE_KEY_END = /-----END [A-Z0-9 ]*PRIVATE KEY-----/;
 const FIELD_LINE = /^-\s+\*\*(.+?)\*\*\s*:?\s*(.*)$/;
 
-function normalizeRelativePath(path: string): string {
-  return redactSecrets(path.split(sep).join("/"));
+function normalizeRelativePath(
+  path: string,
+  redactionLiterals: readonly string[] = [],
+): string {
+  return redactSecrets(path.split(sep).join("/"), redactionLiterals);
 }
 
 function entryRanges(lines: string[]): EntryRange[] {
   const starts: number[] = [];
   for (let index = 0; index < lines.length; index++) {
-    if (lines[index].startsWith("### ")) {
+    if (/^### \d{4}-\d{2}-\d{2} — .+$/.test(lines[index])) {
       starts.push(index);
     }
   }
@@ -69,6 +81,8 @@ function scanSecrets(
   content: string,
   path: string,
   issues: VerifyIssue[],
+  redactionLiterals: readonly string[] = [],
+  commit?: string,
 ): void {
   const lines = content.split("\n");
   let insidePrivateKey = false;
@@ -77,7 +91,7 @@ function scanSecrets(
     const line = lines[index];
     const beginsPrivateKey = PRIVATE_KEY_BEGIN.test(line);
     const endsPrivateKey = PRIVATE_KEY_END.test(line);
-    const redacted = redactSecrets(line) !== line;
+    const redacted = redactSecrets(line, redactionLiterals) !== line;
 
     if (redacted || beginsPrivateKey || insidePrivateKey) {
       addIssue(issues, {
@@ -85,6 +99,7 @@ function scanSecrets(
         path,
         line: index + 1,
         message: "Potential secret-like value detected; inspect locally.",
+        ...(commit ? { commit } : {}),
       });
     }
 
@@ -104,10 +119,20 @@ function inspectFields(
   issues: VerifyIssue[],
 ): void {
   const fields = new Map<string, { value: string; line: number }>();
+  let metadataEnded = false;
+  let sawMetadata = false;
 
   for (let index = range.start + 1; index < range.end; index++) {
-    const match = lines[index].match(FIELD_LINE);
-    if (!match) continue;
+    const line = lines[index];
+    if (!metadataEnded && !line.trim()) {
+      if (sawMetadata) metadataEnded = true;
+      continue;
+    }
+    const match = !metadataEnded ? line.match(FIELD_LINE) : null;
+    if (!match) {
+      metadataEnded = true;
+      continue;
+    }
 
     const name = match[1].replace(/:$/, "").trim();
     if (fields.has(name)) {
@@ -120,6 +145,7 @@ function inspectFields(
       continue;
     }
     fields.set(name, { value: match[2].trim(), line: index + 1 });
+    sawMetadata = true;
   }
 
   const required =
@@ -209,8 +235,12 @@ function inspectMarkdownFile(
   kind: StorageKind,
   expectedMonth: string | undefined,
   issues: VerifyIssue[],
+  redactionLiterals: readonly string[] = [],
 ): number {
-  const path = normalizeRelativePath(relative(workspacePath, filePath));
+  const path = normalizeRelativePath(
+    relative(workspacePath, filePath),
+    redactionLiterals,
+  );
   let content: string;
   try {
     content = readFileSync(filePath, "utf8");
@@ -224,7 +254,7 @@ function inspectMarkdownFile(
     return 0;
   }
 
-  scanSecrets(content, path, issues);
+  scanSecrets(content, path, issues, redactionLiterals);
 
   const lines = content.replace(/^\uFEFF/, "").split("\n");
   const monthHeader = lines[0]?.match(/^## (\d{4}-\d{2})\s*$/);
@@ -322,6 +352,7 @@ function walkStorageDirectory(
   kind: StorageKind,
   expectedMonth: string | undefined,
   issues: VerifyIssue[],
+  redactionLiterals: readonly string[] = [],
 ): { files: number; entries: number } {
   let children;
   try {
@@ -329,7 +360,10 @@ function walkStorageDirectory(
   } catch {
     addIssue(issues, {
       kind: "malformed",
-      path: normalizeRelativePath(relative(workspacePath, directory)),
+      path: normalizeRelativePath(
+        relative(workspacePath, directory),
+        redactionLiterals,
+      ),
       line: 1,
       message: "Could not list storage directory.",
     });
@@ -343,7 +377,10 @@ function walkStorageDirectory(
     if (child.isDirectory()) {
       addIssue(issues, {
         kind: "malformed",
-        path: normalizeRelativePath(relative(workspacePath, childPath)),
+        path: normalizeRelativePath(
+          relative(workspacePath, childPath),
+          redactionLiterals,
+        ),
         line: 1,
         message: "Unexpected nested directory in monthly storage.",
       });
@@ -353,6 +390,7 @@ function walkStorageDirectory(
         kind,
         expectedMonth,
         issues,
+        redactionLiterals,
       );
       files += nested.files;
       entries += nested.entries;
@@ -369,7 +407,10 @@ function walkStorageDirectory(
     if (expectedName && child.name !== expectedName) {
       addIssue(issues, {
         kind: "malformed",
-        path: normalizeRelativePath(relative(workspacePath, childPath)),
+        path: normalizeRelativePath(
+          relative(workspacePath, childPath),
+          redactionLiterals,
+        ),
         line: 1,
         message: `Expected monthly filename ${expectedName}.`,
       });
@@ -382,6 +423,7 @@ function walkStorageDirectory(
       kind,
       expectedMonth,
       issues,
+      redactionLiterals,
     );
   }
 
@@ -392,6 +434,7 @@ function inspectStorageRoot(
   workspacePath: string,
   kind: StorageKind,
   issues: VerifyIssue[],
+  redactionLiterals: readonly string[],
 ): { files: number; entries: number } {
   const root = join(workspacePath, kind);
   if (!existsSync(root)) return { files: 0, entries: 0 };
@@ -417,7 +460,10 @@ function inspectStorageRoot(
       if (!isMonth(child.name)) {
         addIssue(issues, {
           kind: "malformed",
-          path: normalizeRelativePath(relative(workspacePath, childPath)),
+          path: normalizeRelativePath(
+            relative(workspacePath, childPath),
+            redactionLiterals,
+          ),
           line: 1,
           message: "Storage directory must be named YYYY-MM.",
         });
@@ -429,7 +475,10 @@ function inspectStorageRoot(
         if (!existsSync(expectedFile)) {
           addIssue(issues, {
             kind: "malformed",
-            path: normalizeRelativePath(relative(workspacePath, expectedFile)),
+            path: normalizeRelativePath(
+              relative(workspacePath, expectedFile),
+              redactionLiterals,
+            ),
             line: 1,
             message: "Expected monthly markdown file is missing.",
           });
@@ -442,6 +491,7 @@ function inspectStorageRoot(
         kind,
         isMonth(child.name) ? child.name : undefined,
         issues,
+        redactionLiterals,
       );
       files += scanned.files;
       entries += scanned.entries;
@@ -449,7 +499,10 @@ function inspectStorageRoot(
     }
 
     if (child.isFile() && extname(child.name).toLowerCase() === ".md") {
-      const path = normalizeRelativePath(relative(workspacePath, childPath));
+      const path = normalizeRelativePath(
+        relative(workspacePath, childPath),
+        redactionLiterals,
+      );
       addIssue(issues, {
         kind: "malformed",
         path,
@@ -463,6 +516,7 @@ function inspectStorageRoot(
         kind,
         undefined,
         issues,
+        redactionLiterals,
       );
     }
   }
@@ -470,9 +524,104 @@ function inspectStorageRoot(
   return { files, entries };
 }
 
-export function verifyJournal(workspacePath: string): VerifyReport {
+function gitOutput(
+  workspacePath: string,
+  args: string[],
+  trimOutput = true,
+): string | undefined {
+  try {
+    const output = execFileSync("git", args, {
+      cwd: workspacePath,
+      encoding: "utf8",
+      maxBuffer: 128 * 1024 * 1024,
+      stdio: "pipe",
+    });
+    return trimOutput ? output.trim() : output;
+  } catch {
+    return undefined;
+  }
+}
+
+function scanGitHistory(
+  workspacePath: string,
+  issues: VerifyIssue[],
+  redactionLiterals: readonly string[],
+): { commits: number; files: number } {
+  if (gitOutput(workspacePath, ["rev-parse", "--is-inside-work-tree"]) !== "true") {
+    addIssue(issues, {
+      kind: "malformed",
+      path: ".",
+      line: 1,
+      message: "Git history scan requires a journal Git repository.",
+    });
+    return { commits: 0, files: 0 };
+  }
+
+  const log = gitOutput(workspacePath, [
+    "log",
+    "--all",
+    "--format=%H",
+    "--name-only",
+    "--diff-filter=ACMRT",
+    "--",
+    "knowledge",
+    "reminders",
+  ]);
+  if (log === undefined) {
+    addIssue(issues, {
+      kind: "malformed",
+      path: ".",
+      line: 1,
+      message: "Could not read reachable Git history.",
+    });
+    return { commits: 0, files: 0 };
+  }
+
+  const revisions: Array<{ commit: string; path: string }> = [];
+  let currentCommit: string | undefined;
+  for (const rawLine of log.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (/^[0-9a-f]{40,64}$/i.test(line)) {
+      currentCommit = line;
+      continue;
+    }
+    if (currentCommit && /^(knowledge|reminders)\/.+\.md$/i.test(line)) {
+      revisions.push({ commit: currentCommit, path: line });
+    }
+  }
+
+  let files = 0;
+  const commits = new Set<string>();
+  for (const revision of revisions) {
+    const content = gitOutput(
+      workspacePath,
+      ["show", `${revision.commit}:${revision.path}`],
+      false,
+    );
+    if (content === undefined) continue;
+
+    files++;
+    commits.add(revision.commit);
+    const path = normalizeRelativePath(revision.path, redactionLiterals);
+    scanSecrets(
+      content,
+      path,
+      issues,
+      redactionLiterals,
+      revision.commit.slice(0, 12),
+    );
+  }
+
+  return { commits: commits.size, files };
+}
+
+export function verifyJournal(
+  workspacePath: string,
+  options: VerifyOptions = {},
+): VerifyReport {
   const absoluteWorkspace = workspacePath;
   const issues: VerifyIssue[] = [];
+  const redactionLiterals = options.redactionLiterals ?? [];
 
   if (!existsSync(absoluteWorkspace)) {
     addIssue(issues, {
@@ -509,10 +658,26 @@ export function verifyJournal(workspacePath: string): VerifyReport {
     for (const kind of ["knowledge", "reminders"] as const) {
       const root = join(absoluteWorkspace, kind);
       if (!existsSync(root) || !statSync(root).isDirectory()) continue;
-      const scanned = inspectStorageRoot(absoluteWorkspace, kind, issues);
+      const scanned = inspectStorageRoot(
+        absoluteWorkspace,
+        kind,
+        issues,
+        redactionLiterals,
+      );
       filesScanned += scanned.files;
       entriesScanned += scanned.entries;
     }
+  }
+
+  const historyResult =
+    options.history &&
+    existsSync(absoluteWorkspace) &&
+    statSync(absoluteWorkspace).isDirectory()
+      ? scanGitHistory(absoluteWorkspace, issues, redactionLiterals)
+      : { commits: 0, files: 0 };
+
+  for (const issue of issues) {
+    issue.message = redactSecrets(issue.message, redactionLiterals);
   }
 
   issues.sort(
@@ -531,6 +696,8 @@ export function verifyJournal(workspacePath: string): VerifyReport {
     workspace: absoluteWorkspace,
     filesScanned,
     entriesScanned,
+    historyCommitsScanned: historyResult.commits,
+    historyFilesScanned: historyResult.files,
     secretFindings,
     malformedFindings,
     issues,

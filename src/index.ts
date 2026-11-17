@@ -26,6 +26,15 @@ export {
 export { buildContextPack, searchKnowledgeBase } from "./search";
 export { computeStats } from "./stats";
 export { verifyJournal } from "./verify";
+export { importHeadersFromEnv, prepareImport } from "./import";
+export type { ImportFormat, ImportOptions, PreparedImport } from "./import";
+export {
+  buildLocalCatalog,
+  deriveAutomaticTags,
+  extractiveSummary,
+  searchCatalog,
+  updateLocalCatalogIfPresent,
+} from "./catalog";
 export {
   DEFAULT_AGENT,
   DEFAULT_WORKSPACE,
@@ -45,6 +54,8 @@ export {
 } from "./mcp";
 export {
   ALL_SKILL_AGENTS,
+  agentSkillPathForAgent,
+  agentSkillStatuses,
   discoverGitRepos,
   gitHooksStatusInDir,
   gitHookStatus,
@@ -73,6 +84,7 @@ export type {
 export type { GitLike, PullResult, PushResult, SyncResult } from "./git";
 export type {
   ScribeOptions,
+  BatchCaptureResult,
   CaptureResult,
   ReminderUpdateResult,
 } from "./scribe";
@@ -91,7 +103,13 @@ export type {
   SearchResultItem,
 } from "./search";
 export type { CountItem, ScribeStats, StatsOptions } from "./stats";
-export type { VerifyIssue, VerifyIssueKind, VerifyReport } from "./verify";
+export type { CatalogBuildResult, CatalogRecord } from "./catalog";
+export type {
+  VerifyIssue,
+  VerifyIssueKind,
+  VerifyOptions,
+  VerifyReport,
+} from "./verify";
 export type { ConfigOverrides, ScribeConfig } from "./config";
 export type { JsonRpcRequest, JsonRpcResponse } from "./mcp";
 export type {

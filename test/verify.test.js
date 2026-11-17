@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
 const { mkdirSync, readFileSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const test = require("node:test");
@@ -76,6 +77,33 @@ test("verifyJournal detects secret-like values without returning their contents"
   );
   assert.doesNotMatch(JSON.stringify(report), /PRIVATE_MATERIAL/);
   assert.doesNotMatch(JSON.stringify(report), /ghp_/);
+});
+
+test("verifyJournal applies configured redaction literals without echoing them", (t) => {
+  const dir = tempDir(t);
+  const file = join(dir, "knowledge", "2026-11", "2026-11-knowledge.md");
+  const literal = "ORG_PRIVATE_VALUE";
+  mkdirSync(join(dir, "knowledge", "2026-11"), { recursive: true });
+  writeFileSync(
+    file,
+    [
+      "## 2026-11",
+      "",
+      "### 2026-11-12 — Internal reference",
+      "",
+      "- **Workspace:** ~/code/app",
+      "- **Agent:** OpenCode",
+      "- **Category:** finding",
+      "",
+      `Reference: ${literal}`,
+      "",
+    ].join("\n"),
+  );
+
+  const report = verifyJournal(dir, { redactionLiterals: [literal] });
+  assert.equal(report.ok, false);
+  assert.equal(report.secretFindings, 1);
+  assert.doesNotMatch(JSON.stringify(report), new RegExp(literal));
 });
 
 test("verifyJournal reports malformed headings, fields, dates, and storage paths", (t) => {
@@ -181,4 +209,83 @@ test("verify reports a missing journal workspace", (t) => {
   const report = parseJson(result);
   assert.equal(report.ok, false);
   assert.match(report.issues[0].message, /workspace does not exist/);
+});
+
+test("verify --history finds secrets removed from the current journal files", (t) => {
+  const dir = tempDir(t);
+  const init = spawnSync("git", ["init", "-b", "main", dir], {
+    encoding: "utf8",
+  });
+  assert.equal(init.status, 0, init.stderr);
+
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: "Scribe Verify Test",
+    GIT_AUTHOR_EMAIL: "verify@example.test",
+    GIT_COMMITTER_NAME: "Scribe Verify Test",
+    GIT_COMMITTER_EMAIL: "verify@example.test",
+  };
+  const runGit = (args) => {
+    const result = spawnSync("git", args, {
+      cwd: dir,
+      encoding: "utf8",
+      env,
+    });
+    assert.equal(result.status, 0, result.stderr);
+  };
+
+  const file = join(dir, "knowledge", "2026-11", "2026-11-knowledge.md");
+  const token = `ghp_${"S".repeat(32)}`;
+  mkdirSync(join(dir, "knowledge", "2026-11"), { recursive: true });
+  const body = (text) =>
+    [
+      "## 2026-11",
+      "",
+      "### 2026-11-16 — Historical entry",
+      "",
+      "- **Workspace:** ~/code/app",
+      "- **Agent:** OpenCode",
+      "- **Category:** finding",
+      "",
+      text,
+      "",
+    ].join("\n");
+
+  writeFileSync(file, body(`Previously exposed: ${token}`));
+  runGit(["add", "knowledge"]);
+  runGit(["commit", "-m", "Add historic note"]);
+
+  writeFileSync(file, body("Credential removed from the current file."));
+  runGit(["add", "knowledge"]);
+  runGit(["commit", "-m", "Remove historic credential"]);
+
+  const currentReport = verifyJournal(dir);
+  assert.equal(currentReport.ok, true);
+  assert.equal(currentReport.secretFindings, 0);
+
+  const historyReport = verifyJournal(dir, { history: true });
+  assert.equal(historyReport.ok, false);
+  assert.ok(historyReport.historyCommitsScanned >= 2);
+  assert.ok(historyReport.historyFilesScanned >= 2);
+  const historicalFinding = historyReport.issues.find(
+    (issue) => issue.kind === "secret",
+  );
+  assert.ok(historicalFinding);
+  assert.ok(historicalFinding.commit);
+  assert.doesNotMatch(JSON.stringify(historyReport), /ghp_/);
+
+  const cliResult = runCli(
+    ["verify", "--history", "--json"],
+    {
+      env: {
+        SCRIBE_CONFIG: join(dir, "scribe-config.json"),
+        SCRIBE_WORKSPACE: dir,
+      },
+    },
+  );
+  assert.equal(cliResult.status, 1);
+  const cliReport = parseJson(cliResult);
+  assert.ok(cliReport.historyFilesScanned >= 2);
+  assert.ok(cliReport.issues.some((issue) => issue.commit));
+  assert.doesNotMatch(cliResult.stdout, /ghp_/);
 });

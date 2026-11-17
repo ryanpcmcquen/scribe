@@ -164,6 +164,45 @@ test("capture --stdin accepts JSON and flags override it", (t) => {
   assert.equal(reminders.entries[0].title, "Flag title wins");
 });
 
+test("capture applies configured redaction literals before returning JSON", (t) => {
+  const dir = tempDir(t);
+  const workspace = `${dir}/journal`;
+  const literal = "TEAM_PRIVATE_REFERENCE";
+  const env = {
+    SCRIBE_CONFIG: `${dir}/config.json`,
+    SCRIBE_WORKSPACE: workspace,
+    SCRIBE_AUTO_COMMIT: "false",
+    SCRIBE_AUTO_PUSH: "false",
+    SCRIBE_REDACTION_LITERALS: JSON.stringify([literal]),
+  };
+
+  const init = runCli(
+    ["init", "--workspace", workspace, "--no-git", "--json"],
+    { env },
+  );
+  assert.equal(init.status, 0, init.stderr);
+
+  const capture = runCli(
+    [
+      "capture",
+      "--title",
+      `Research ${literal}`,
+      "--body",
+      `Found ${literal} in the notes.`,
+      "--json",
+    ],
+    { env },
+  );
+  assert.equal(capture.status, 0, capture.stderr);
+  const payload = parseJson(capture);
+  assert.equal(payload.entry.title, "Research [REDACTED_CUSTOM]");
+  assert.equal(payload.entry.body, "Found [REDACTED_CUSTOM] in the notes.");
+  assert.doesNotMatch(capture.stdout, new RegExp(literal));
+
+  const read = parseJson(runCli(["read", "--json"], { env }));
+  assert.equal(read.entries[0].body, "Found [REDACTED_CUSTOM] in the notes.");
+});
+
 test("created knowledge appears in read --all across months", (t) => {
   const { env } = initWorkspace(t, ["--no-git"]);
 

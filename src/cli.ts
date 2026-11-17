@@ -21,7 +21,13 @@ import {
 import { currentMonth, isDate, isMonth, localDate } from "./date";
 import { Git, isRemoteTarget } from "./git";
 import {
+  importHeadersFromEnv,
+  ImportFormat,
+  prepareImport,
+} from "./import";
+import {
   AgentStopPayload,
+  agentSkillStatuses,
   gitHooksStatusInDir,
   gitHookStatus,
   installAgentSkills,
@@ -73,11 +79,13 @@ interface CaptureInput {
 const BOOLEAN_FLAGS = new Set([
   "all",
   "all-agents",
+  "allow-private-network",
   "bullets",
   "dry-run",
   "force",
   "git",
   "help",
+  "history",
   "json",
   "no-commit",
   "no-git",
@@ -291,6 +299,9 @@ function printConfig(config: ScribeConfig, configPath: string): void {
   console.log(`autoCommit: ${config.autoCommit}`);
   console.log(`autoPush: ${config.autoPush}`);
   console.log(`remote: ${config.remote ?? "(auto)"}`);
+  console.log(
+    `redactionLiterals: ${config.redactionLiterals?.length ?? 0} configured`,
+  );
 }
 
 function printKnowledgeEntries(entries: KnowledgeEntry[]): void {
@@ -448,11 +459,21 @@ async function commandCapture(
     remote: config.remote,
     autoCommit: config.autoCommit,
     autoPush: config.autoPush,
+    redactionLiterals: config.redactionLiterals,
   });
 
-  const target = scribe.pathFor(entry);
+  const sanitizedEntry =
+    "category" in entry
+      ? scribe.storage.sanitizeKnowledgeEntry(entry)
+      : scribe.storage.sanitizeReminderEntry(entry);
+  const target = scribe.pathFor(sanitizedEntry);
   if (dryRun) {
-    const result = { ok: true, dryRun: true, entry, path: target };
+    const result = {
+      ok: true,
+      dryRun: true,
+      entry: sanitizedEntry,
+      path: target,
+    };
     if (json) printJson(result);
     else {
       console.log(`Would capture ${"category" in entry ? "knowledge" : "reminder"}: ${entry.title}`);
@@ -461,12 +482,12 @@ async function commandCapture(
     return 0;
   }
 
-  const result = await scribe.record(entry);
+  const result = await scribe.record(sanitizedEntry);
   if (json) {
-    printJson({ ok: true, entry, ...result });
+    printJson({ ok: true, entry: sanitizedEntry, ...result });
   } else {
     console.log(
-      `Captured ${"category" in entry ? "knowledge" : "reminder"}: ${entry.title}`,
+      `Captured ${"category" in sanitizedEntry ? "knowledge" : "reminder"}: ${sanitizedEntry.title}`,
     );
     console.log(`  ${result.path}`);
     console.log(`  committed: ${result.committed ? "yes" : "no"}`);
@@ -475,6 +496,121 @@ async function commandCapture(
     );
   }
 
+  return 0;
+}
+
+async function commandImport(
+  args: ParsedArgs,
+  config: ScribeConfig,
+): Promise<number> {
+  const json = flagBool(args.flags, "json");
+  const dryRun = flagBool(args.flags, "dry-run");
+  const source = args.positionals[0];
+  if (!source) {
+    throw new Error("import requires a file, directory, Git repository, or URL");
+  }
+
+  const formatValue = flagString(args.flags, "format") ?? "auto";
+  const formats: ImportFormat[] = [
+    "auto",
+    "markdown",
+    "json",
+    "jsonl",
+    "text",
+    "html",
+    "git",
+    "url",
+  ];
+  if (!formats.includes(formatValue as ImportFormat)) {
+    throw new Error(`unsupported import format "${formatValue}"`);
+  }
+
+  const limitRaw = flagString(args.flags, "limit");
+  const limit = limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : undefined;
+  if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+    throw new Error(`invalid limit "${limitRaw}" (expected positive integer)`);
+  }
+  const since = flagString(args.flags, "since");
+  if (since && !isDate(since)) {
+    throw new Error(`invalid --since date "${since}" (expected YYYY-MM-DD)`);
+  }
+  const date = flagString(args.flags, "date");
+  if (date && !isDate(date)) {
+    throw new Error(`invalid date "${date}" (expected YYYY-MM-DD)`);
+  }
+
+  const prepared = await prepareImport({
+    source,
+    format: formatValue as ImportFormat,
+    workspace: flagString(args.flags, "repo"),
+    agent: flagString(args.flags, "agent"),
+    date,
+    limit,
+    since,
+    allowPrivateNetwork: flagBool(args.flags, "allow-private-network"),
+    headers: /^https?:\/\//i.test(source) ? importHeadersFromEnv() : undefined,
+  });
+
+  const scribe = new Scribe({
+    workspacePath: config.workspace,
+    remote: config.remote,
+    autoCommit: config.autoCommit,
+    autoPush: config.autoPush,
+    redactionLiterals: config.redactionLiterals,
+  });
+  const safeEntries = prepared.entries.map((entry) =>
+    scribe.storage.sanitizeKnowledgeEntry(entry),
+  );
+  const safeSource = redactSecrets(
+    tildifyPath(prepared.source),
+    config.redactionLiterals,
+  );
+
+  if (dryRun) {
+    const preview = safeEntries.slice(0, 20).map((entry) => ({
+      title: entry.title,
+      date: entry.date,
+      category: entry.category,
+      source: entry.source,
+    }));
+    const result = {
+      ok: true,
+      dryRun: true,
+      format: prepared.format,
+      source: safeSource,
+      entries: safeEntries.length,
+      preview,
+    };
+    if (json) printJson(result);
+    else {
+      console.log(
+        `Would import ${safeEntries.length} entries from ${safeSource} (${prepared.format}).`,
+      );
+      for (const entry of preview) {
+        console.log(`  ${entry.date} — ${entry.title} [${entry.category}]`);
+      }
+    }
+    return 0;
+  }
+
+  const result = await scribe.recordBatch(safeEntries);
+  if (json) {
+    printJson({
+      ok: true,
+      format: prepared.format,
+      source: safeSource,
+      ...result,
+      paths: result.paths.map((path) => tildifyPath(path)),
+    });
+  } else {
+    console.log(
+      `Imported ${result.created} entries from ${safeSource} (${prepared.format}); skipped ${result.deduplicated} duplicates.`,
+    );
+    console.log(`  committed: ${result.committed ? "yes" : "no"}`);
+    console.log(
+      `  pushed: ${result.pushed ? "yes" : "no"}${result.pushError ? ` (${result.pushError})` : ""}`,
+    );
+  }
   return 0;
 }
 
@@ -495,6 +631,7 @@ function commandRead(args: ParsedArgs, config: ScribeConfig): number {
     workspacePath: config.workspace,
     autoCommit: false,
     autoPush: false,
+    redactionLiterals: config.redactionLiterals,
   });
   let entries = all ? scribe.readAllKnowledge() : scribe.readKnowledge(month);
   if (repoFilter) {
@@ -538,6 +675,7 @@ async function commandReminders(
       remote: config.remote,
       autoCommit: config.autoCommit,
       autoPush: config.autoPush,
+      redactionLiterals: config.redactionLiterals,
     });
 
     const outcome =
@@ -585,6 +723,7 @@ async function commandReminders(
     workspacePath: config.workspace,
     autoCommit: false,
     autoPush: false,
+    redactionLiterals: config.redactionLiterals,
   });
   let entries = all ? scribe.readAllReminders() : scribe.readReminders(month);
   if (statusFilter && statusFilter !== "all") {
@@ -639,6 +778,7 @@ function commandSearch(args: ParsedArgs, config: ScribeConfig): number {
     workspacePath: config.workspace,
     autoCommit: false,
     autoPush: false,
+    redactionLiterals: config.redactionLiterals,
   });
   const results = scribe.search({
     query,
@@ -687,6 +827,7 @@ function commandContext(args: ParsedArgs, config: ScribeConfig): number {
     workspacePath: config.workspace,
     autoCommit: false,
     autoPush: false,
+    redactionLiterals: config.redactionLiterals,
   });
   const pack = scribe.context({ workspace, query, limit });
 
@@ -720,6 +861,7 @@ function commandStats(args: ParsedArgs, config: ScribeConfig): number {
     workspacePath: config.workspace,
     autoCommit: false,
     autoPush: false,
+    redactionLiterals: config.redactionLiterals,
   });
   const stats = scribe.stats({ month, all, workspace, asOfDate });
 
@@ -738,11 +880,16 @@ function commandVerify(args: ParsedArgs, config: ScribeConfig): number {
     workspacePath: config.workspace,
     autoCommit: false,
     autoPush: false,
+    redactionLiterals: config.redactionLiterals,
   });
-  const report = scribe.verify();
+  const history = flagBool(args.flags, "history");
+  const report = scribe.verify({ history });
   const output = {
     ...report,
-    workspace: redactSecrets(tildifyPath(report.workspace)),
+    workspace: redactSecrets(
+      tildifyPath(report.workspace),
+      config.redactionLiterals,
+    ),
   };
 
   if (json) {
@@ -754,9 +901,14 @@ function commandVerify(args: ParsedArgs, config: ScribeConfig): number {
     console.log(
       `  secrets: ${report.secretFindings}; malformed records: ${report.malformedFindings}`,
     );
+    if (history) {
+      console.log(
+        `  Git history: ${report.historyFilesScanned} file versions across ${report.historyCommitsScanned} commits scanned`,
+      );
+    }
     for (const issue of report.issues) {
       console.log(
-        `  ${issue.path}:${issue.line} [${issue.kind}] ${issue.message}`,
+        `  ${issue.path}:${issue.line}${issue.commit ? ` (${issue.commit})` : ""} [${issue.kind}] ${issue.message}`,
       );
     }
     if (report.ok) {
@@ -765,6 +917,70 @@ function commandVerify(args: ParsedArgs, config: ScribeConfig): number {
   }
 
   return report.ok ? 0 : 1;
+}
+
+function commandCatalog(args: ParsedArgs, config: ScribeConfig): number {
+  const json = flagBool(args.flags, "json");
+  const action = args.positionals[0] ?? "build";
+  const scribe = new Scribe({
+    workspacePath: config.workspace,
+    autoCommit: false,
+    autoPush: false,
+    redactionLiterals: config.redactionLiterals,
+  });
+
+  if (action === "build") {
+    const catalog = scribe.buildCatalog({
+      force: flagBool(args.flags, "force"),
+    });
+    const output = {
+      ok: true,
+      path: tildifyPath(catalog.path),
+      total: catalog.total,
+      updatedMonths: catalog.updatedMonths,
+      reusedMonths: catalog.reusedMonths,
+      aiCalls: 0,
+    };
+    if (json) {
+      printJson(output);
+    } else {
+      console.log(
+        `Catalog built locally: ${catalog.total} entries (${catalog.updatedMonths.length} months updated, ${catalog.reusedMonths.length} reused).`,
+      );
+      console.log(`  ${tildifyPath(catalog.path)}`);
+      console.log("  AI calls: 0");
+    }
+    return 0;
+  }
+
+  if (action === "search") {
+    const query =
+      flagString(args.flags, "query") ??
+      args.positionals.slice(1).join(" ").trim();
+    const limitRaw = flagString(args.flags, "limit");
+    const limit = limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : 10;
+    if (!query) throw new Error("catalog search requires a query");
+    if (!Number.isInteger(limit) || limit <= 0) {
+      throw new Error(`invalid limit "${limitRaw}" (expected positive integer)`);
+    }
+
+    const results = scribe.searchCatalog(query, limit);
+    if (json) {
+      printJson({ ok: true, query, count: results.length, results, aiCalls: 0 });
+    } else if (results.length === 0) {
+      console.log("No matching catalog entries.");
+    } else {
+      for (const item of results) {
+        console.log(`\n${item.date} — ${item.title} [${item.category}]`);
+        if (item.tags.length > 0) console.log(`  tags: ${item.tags.join(", ")}`);
+        if (item.summary) console.log(`  ${item.summary}`);
+        console.log(`  source: ${item.path}`);
+      }
+    }
+    return 0;
+  }
+
+  throw new Error(`unknown catalog action "${action}" (expected build or search)`);
 }
 
 async function commandFocus(
@@ -815,6 +1031,7 @@ async function commandFocus(
     workspacePath: config.workspace,
     autoCommit: false,
     autoPush: false,
+    redactionLiterals: config.redactionLiterals,
   });
   const { items, bullets } = scribe.composeBrief(externalInput, {
     month,
@@ -915,7 +1132,15 @@ function commandConfig(
   configPath: string,
 ): number {
   if (flagBool(args.flags, "json")) {
-    printJson({ ok: true, configPath, config });
+    const { redactionLiterals, ...safeConfig } = config;
+    printJson({
+      ok: true,
+      configPath,
+      config: {
+        ...safeConfig,
+        redactionLiteralsConfigured: redactionLiterals?.length ?? 0,
+      },
+    });
   } else {
     printConfig(config, configPath);
   }
@@ -933,6 +1158,7 @@ async function commandSync(
     remote: config.remote,
     autoCommit: config.autoCommit,
     autoPush: config.autoPush,
+    redactionLiterals: config.redactionLiterals,
   });
 
   const outcome = await scribe.sync(message);
@@ -1129,6 +1355,11 @@ function commandHooks(args: ParsedArgs, config: ScribeConfig): number {
   }
 
   if (action === "status") {
+    const skillResults = useSkills
+      ? agentSkillStatuses({
+          agents: useAllAgents ? undefined : ["opencode"],
+        })
+      : undefined;
     if (scanDir) {
       const gitHooks = gitHooksStatusInDir(scanDir, {
         skipWorkspace: config.workspace,
@@ -1145,13 +1376,24 @@ function commandHooks(args: ParsedArgs, config: ScribeConfig): number {
       return 0;
     }
 
-    const gitResult = gitHookStatus(repoPath);
+    const gitResult = useGit ? gitHookStatus(repoPath) : undefined;
     if (json) {
-      printJson({ ok: true, gitHook: gitResult });
+      printJson({
+        ok: true,
+        ...(gitResult ? { gitHook: gitResult } : {}),
+        ...(skillResults ? { agentSkills: skillResults } : {}),
+      });
     } else {
-      console.log(
-        `git post-commit hook: ${gitResult.installed ? "installed" : "not installed"} (${gitResult.hookPath})`,
-      );
+      if (gitResult) {
+        console.log(
+          `git post-commit hook: ${gitResult.installed ? "installed" : "not installed"} (${gitResult.hookPath})`,
+        );
+      }
+      for (const skill of skillResults ?? []) {
+        console.log(
+          `${skill.agent} skill: ${skill.installed ? "installed" : "not installed"} (${skill.skillPath})`,
+        );
+      }
     }
     return 0;
   }
@@ -1182,6 +1424,7 @@ Usage:
 Commands:
   init       Initialize the journal, config, and optional git repo
   capture    Capture a knowledge entry or reminder
+  import     Import Markdown, JSON, text, HTML, Git history, or web pages
   read       Read knowledge entries
   reminders  Read or update reminders (done, snooze, reopen)
   focus      Rank knowledge entries and pending reminders for a focus list
@@ -1189,6 +1432,7 @@ Commands:
   context    Build a compact context pack for a workspace or query
   stats      Show summary statistics across knowledge entries and reminders
   verify     Audit journal structure and scan for likely secrets
+  catalog    Build or search the local AI retrieval catalog
   sync       Sync journal repo (commit local changes, pull --rebase, push)
   mcp        Start the Model Context Protocol (MCP) server on stdio
   hook       Run an automatic capture hook (post-commit, agent-stop)
@@ -1220,9 +1464,27 @@ Capture options:
   --stdin              Read a JSON entry from stdin
   --dry-run            Validate without writing
 
+Import options:
+  --format <auto|markdown|json|jsonl|text|html|git|url>
+  --repo <path>        Workspace the imported knowledge applies to
+  --limit <N>          Maximum documents or commits to import
+  --since <YYYY-MM-DD> Lower date bound for Git history imports
+  --allow-private-network
+                       Permit explicitly supplied internal URLs
+  --dry-run            Preview without writing
+  --json               Emit machine-readable JSON
+
 Read options:
   --month <YYYY-MM>
-  --all`);
+  --all
+
+Verify options:
+  --history            Scan reachable Git history for likely secrets
+  --json               Emit machine-readable JSON
+
+Catalog commands:
+  scribe catalog build [--force] [--json]
+  scribe catalog search <query> [--limit <N>] [--json]`);
 }
 
 export async function main(argv: string[]): Promise<number> {
@@ -1250,6 +1512,8 @@ export async function main(argv: string[]): Promise<number> {
       return commandInit(args, config, configPath);
     case "capture":
       return commandCapture(args, config);
+    case "import":
+      return commandImport(args, config);
     case "read":
       return commandRead(args, config);
     case "reminders":
@@ -1264,6 +1528,8 @@ export async function main(argv: string[]): Promise<number> {
       return commandStats(args, config);
     case "verify":
       return commandVerify(args, config);
+    case "catalog":
+      return commandCatalog(args, config);
     case "sync":
       return commandSync(args, config);
     case "mcp":

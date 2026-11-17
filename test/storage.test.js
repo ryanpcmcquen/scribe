@@ -280,6 +280,35 @@ test("redactSecrets scrubs credentials and private keys across entry fields", (t
   );
 });
 
+test("custom redaction literals apply to knowledge and reminder fields", (t) => {
+  const dir = tempDir(t);
+  const kb = new KnowledgeBase(dir, ["ORG_PRIVATE_VALUE"]);
+
+  kb.appendKnowledgeEntry({
+    date: "2026-11-17",
+    title: "Investigate ORG_PRIVATE_VALUE",
+    workspace: "~/code/ORG_PRIVATE_VALUE",
+    agent: "OpenCode",
+    category: "finding",
+    body: "Found ORG_PRIVATE_VALUE in a configuration example.",
+  });
+  kb.appendReminder({
+    date: "2026-11-17",
+    title: "Rotate ORG_PRIVATE_VALUE",
+    priority: "p1",
+    context: "A private value was captured.",
+    action: "Replace ORG_PRIVATE_VALUE.",
+  });
+
+  const [knowledge] = kb.readKnowledge("2026-11");
+  const [reminder] = kb.readReminders("2026-11");
+  assert.equal(knowledge.title, "Investigate [REDACTED_CUSTOM]");
+  assert.equal(knowledge.workspace, "~/code/[REDACTED_CUSTOM]");
+  assert.equal(knowledge.body, "Found [REDACTED_CUSTOM] in a configuration example.");
+  assert.equal(reminder.title, "Rotate [REDACTED_CUSTOM]");
+  assert.equal(reminder.action, "Replace [REDACTED_CUSTOM].");
+});
+
 test("Scribe.record deduplicates identical entries on the same date", async (t) => {
   const dir = tempDir(t);
   const scribe = new Scribe({

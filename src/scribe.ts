@@ -28,7 +28,14 @@ import {
   SearchResultItem,
 } from "./search";
 import { computeStats, ScribeStats, StatsOptions } from "./stats";
-import { verifyJournal, VerifyReport } from "./verify";
+import { verifyJournal, VerifyOptions, VerifyReport } from "./verify";
+import {
+  buildLocalCatalog,
+  CatalogBuildResult,
+  CatalogRecord,
+  searchCatalog,
+  updateLocalCatalogIfPresent,
+} from "./catalog";
 
 export interface ScribeOptions {
   workspacePath?: string;
@@ -36,6 +43,7 @@ export interface ScribeOptions {
   remote?: string;
   autoCommit?: boolean;
   autoPush?: boolean;
+  redactionLiterals?: string[];
 }
 
 export interface CaptureResult {
@@ -57,18 +65,30 @@ export interface ReminderUpdateResult {
   pushError?: string;
 }
 
+export interface BatchCaptureResult {
+  input: number;
+  created: number;
+  deduplicated: number;
+  paths: string[];
+  committed: boolean;
+  pushed: boolean;
+  pushError?: string;
+}
+
 export class Scribe {
   readonly storage: KnowledgeBase;
   readonly git: Git;
 
   private readonly workspacePath: string;
+  private readonly redactionLiterals: string[];
   private readonly autoCommit: boolean;
   private readonly autoPush: boolean;
 
   constructor(options: ScribeOptions) {
     const workspacePath = options.workspacePath ?? DEFAULT_WORKSPACE;
     this.workspacePath = workspacePath;
-    this.storage = new KnowledgeBase(workspacePath);
+    this.redactionLiterals = options.redactionLiterals ?? [];
+    this.storage = new KnowledgeBase(workspacePath, this.redactionLiterals);
     this.git = new Git(options.repoPath ?? workspacePath, options.remote);
     this.autoCommit = options.autoCommit ?? true;
     this.autoPush = options.autoPush ?? true;
@@ -117,14 +137,18 @@ export class Scribe {
   }
 
   private async recordUnlocked(entry: ScribeEntry): Promise<CaptureResult> {
-    const isDuplicate =
+    const sanitizedEntry =
       "category" in entry
-        ? this.storage.hasDuplicateKnowledge(entry)
-        : this.storage.hasDuplicateReminder(entry);
+        ? this.storage.sanitizeKnowledgeEntry(entry)
+        : this.storage.sanitizeReminderEntry(entry);
+    const isDuplicate =
+      "category" in sanitizedEntry
+        ? this.storage.hasDuplicateKnowledge(sanitizedEntry)
+        : this.storage.hasDuplicateReminder(sanitizedEntry);
 
     if (isDuplicate) {
       return {
-        path: this.pathFor(entry),
+        path: this.pathFor(sanitizedEntry),
         committed: false,
         pushed: false,
         deduplicated: true,
@@ -132,13 +156,21 @@ export class Scribe {
     }
 
     const path =
-      "category" in entry
-        ? this.storage.appendKnowledgeEntry(entry)
-        : this.storage.appendReminder(entry);
+      "category" in sanitizedEntry
+        ? this.storage.appendKnowledgeEntry(sanitizedEntry)
+        : this.storage.appendReminder(sanitizedEntry);
 
     const gitOutcome = await this.commitAndPush(
-      `Scribe: ${entry.date} — ${entry.title}`,
+      `Scribe: ${sanitizedEntry.date} — ${sanitizedEntry.title}`,
     );
+
+    try {
+      updateLocalCatalogIfPresent(
+        this.storage,
+        this.workspacePath,
+        this.redactionLiterals,
+      );
+    } catch {}
 
     return {
       path,
@@ -153,6 +185,49 @@ export class Scribe {
     return withWorkspaceLock(this.workspacePath, () =>
       this.recordUnlocked(entry),
     );
+  }
+
+  async recordBatch(entries: KnowledgeEntry[]): Promise<BatchCaptureResult> {
+    return withWorkspaceLock(this.workspacePath, async () => {
+      const paths: string[] = [];
+      let created = 0;
+      let deduplicated = 0;
+
+      for (const entry of entries) {
+        const sanitized = this.storage.sanitizeKnowledgeEntry(entry);
+        if (this.storage.hasDuplicateKnowledge(sanitized)) {
+          deduplicated++;
+          continue;
+        }
+        paths.push(this.storage.appendKnowledgeEntry(sanitized));
+        created++;
+      }
+
+      const gitOutcome =
+        created > 0
+          ? await this.commitAndPush(
+              `Scribe: import ${created} knowledge entries`,
+            )
+          : { committed: false, pushed: false };
+
+      if (created > 0) {
+        try {
+          updateLocalCatalogIfPresent(
+            this.storage,
+            this.workspacePath,
+            this.redactionLiterals,
+          );
+        } catch {}
+      }
+
+      return {
+        input: entries.length,
+        created,
+        deduplicated,
+        paths,
+        ...gitOutcome,
+      };
+    });
   }
 
   /**
@@ -179,18 +254,19 @@ export class Scribe {
       snoozedUntil: options.snoozedUntil,
       completedAt: options.completedAt,
     });
+    const sanitizedReminder = this.storage.sanitizeReminderEntry(updated);
 
     const commitSummary =
       status === "done"
-        ? `Scribe: mark reminder done — ${updated.title}`
+        ? `Scribe: mark reminder done — ${sanitizedReminder.title}`
         : status === "snoozed"
-          ? `Scribe: snooze reminder until ${updated.snoozedUntil} — ${updated.title}`
-          : `Scribe: reopen reminder — ${updated.title}`;
+          ? `Scribe: snooze reminder until ${sanitizedReminder.snoozedUntil} — ${sanitizedReminder.title}`
+          : `Scribe: reopen reminder — ${sanitizedReminder.title}`;
 
     const gitOutcome = await this.commitAndPush(commitSummary);
 
     return {
-      reminder: updated,
+      reminder: sanitizedReminder,
       path,
       month,
       ...gitOutcome,
@@ -318,8 +394,25 @@ export class Scribe {
   /**
    * Read-only audit of journal structure and likely secret values.
    */
-  verify(): VerifyReport {
-    return verifyJournal(this.workspacePath);
+  verify(options: Omit<VerifyOptions, "redactionLiterals"> = {}): VerifyReport {
+    return verifyJournal(this.workspacePath, {
+      ...options,
+      redactionLiterals: this.redactionLiterals,
+    });
+  }
+
+  buildCatalog(options: { force?: boolean } = {}): CatalogBuildResult {
+    return buildLocalCatalog(
+      this.storage,
+      this.workspacePath,
+      this.redactionLiterals,
+      options,
+    );
+  }
+
+  searchCatalog(query: string, limit = 10): CatalogRecord[] {
+    const catalog = this.buildCatalog();
+    return searchCatalog(catalog.records, query, limit);
   }
 
   /**
