@@ -199,6 +199,13 @@ bodies. Results use local BM25-style ranking, so title matches and rare terms
 matter more than raw repetition. Markdown remains canonical and the cache can be
 regenerated at any time.
 
+### Journal README Index
+
+Scribe creates and updates a managed table of contents in the journal's
+`README.md` during `scribe init`, captures, imports, reminder updates, and
+`scribe sync`. It links monthly knowledge and reminder files with relative paths
+and preserves README content outside the managed section.
+
 ### Search & Context Retrieval
 
 Search across all months over both knowledge entries and reminders:
@@ -325,19 +332,19 @@ automatic mechanisms on top of the skills:
      automatically skipping the Scribe journal workspace.
    - `scribe hook agent-stop --stdin` accepts agent stop-hook JSON payloads (or
      falls back to capturing today's latest commit in the workspace).
-    - `scribe hooks install --skills` syncs the OpenCode capture skill into
+   - `scribe hooks install --skills` syncs the OpenCode capture skill into
       `~/.config/opencode/skills/scribe-capture/SKILL.md`; add `--all-agents` to
       sync skill templates for OpenCode, Claude Code, Codex, Cline, and
       Antigravity at once.
-    - `scribe hooks status --skills --all-agents` checks the five global skill
+   - `scribe hooks status --skills --all-agents` checks the five global skill
       destinations without printing skill contents.
-    - Global locations: OpenCode `~/.config/opencode/skills/`, Claude Code
+   - Global locations: OpenCode `~/.config/opencode/skills/`, Claude Code
       `~/.claude/skills/`, Codex `~/.agents/skills/`, Cline `~/.cline/skills/`,
       and Antigravity `~/.gemini/config/skills/`.
 3. **OpenCode V2 server plugin (`dist/plugins/opencode.js`)** — registers the
-   four Scribe tools natively, injects the Scribe capture directive into
-   session context hooks so the model never forgets to record findings and
-   decisions, and captures unrecorded commits on session compaction.
+    six Scribe tools natively, injects the Scribe capture directive into
+    session context hooks so the model never forgets to record findings and
+    decisions, and captures unrecorded commits on session compaction.
 
 ## Configuration
 
@@ -372,7 +379,6 @@ Environment overrides (highest priority after command-line flags):
 | `SCRIBE_AUTO_COMMIT` | `true`/`false` |
 | `SCRIBE_AUTO_PUSH` | `true`/`false` |
 | `SCRIBE_REDACTION_LITERALS` | JSON array of exact strings |
-| `SCRIBE_IMPORT_HEADERS` | JSON object of HTTP headers for URL imports |
 | `SCRIBE_IMPORT_HEADERS` | JSON object of HTTP headers for URL imports |
 
 Precedence: command-line flags → environment → config file → defaults.
