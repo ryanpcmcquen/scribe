@@ -32,10 +32,17 @@ export interface CatalogBuildResult {
 }
 
 interface CatalogCache {
-  version: 1;
+  version: 2;
   redactionHash: string;
   files: Record<string, { size: number; mtimeMs: number; hash: string }>;
-  records: CatalogRecord[];
+  records: IndexedCatalogRecord[];
+  postings: Record<string, Array<{ id: string; tf: number; length: number }>>;
+  averageLength: number;
+}
+
+interface IndexedCatalogRecord extends CatalogRecord {
+  termFrequencies: Record<string, number>;
+  documentLength: number;
 }
 
 const STOP_WORDS = new Set(
@@ -118,9 +125,11 @@ function loadCache(path: string): CatalogCache | undefined {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as CatalogCache;
     if (
-      parsed.version === 1 &&
+      parsed.version === 2 &&
       parsed.files &&
-      Array.isArray(parsed.records)
+      Array.isArray(parsed.records) &&
+      parsed.postings &&
+      typeof parsed.averageLength === "number"
     ) {
       return parsed;
     }
@@ -134,7 +143,7 @@ function recordsForMonth(
   storage: KnowledgeBase,
   workspacePath: string,
   month: string,
-): CatalogRecord[] {
+): IndexedCatalogRecord[] {
   const filePath = storage.knowledgeFileFor(`${month}-01`);
   const path = normalizeRelativePath(relative(workspacePath, filePath));
   return storage.readKnowledge(month).map((rawEntry) => {
@@ -152,6 +161,22 @@ function recordsForMonth(
       ),
     ).slice(0, 20);
 
+    const termFrequencies: Record<string, number> = {};
+    const addTerms = (value: string, weight: number): number => {
+      const values =
+        value.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}+#.-]{1,}/gu) ?? [];
+      for (const token of values) {
+        if (token.length < 3 || STOP_WORDS.has(token)) continue;
+        termFrequencies[token] = (termFrequencies[token] ?? 0) + weight;
+      }
+      return values.filter((token) => token.length >= 3 && !STOP_WORDS.has(token))
+        .length;
+    };
+    const bodyLength = addTerms(entry.body, 1);
+    const titleLength = addTerms(entry.title, 3);
+    const tagLength = tags.reduce((count, tag) => count + addTerms(tag, 2), 0);
+    const summaryLength = addTerms(summary, 1);
+
     return {
       id,
       path,
@@ -161,8 +186,37 @@ function recordsForMonth(
       category: entry.category,
       summary,
       tags,
+      termFrequencies,
+      documentLength: Math.max(
+        bodyLength + titleLength + tagLength + summaryLength,
+        1,
+      ),
     };
   });
+}
+
+function buildPostings(records: IndexedCatalogRecord[]): {
+  postings: CatalogCache["postings"];
+  averageLength: number;
+} {
+  const postings: CatalogCache["postings"] = {};
+  let totalLength = 0;
+
+  for (const record of records) {
+    totalLength += record.documentLength;
+    for (const [term, tf] of Object.entries(record.termFrequencies)) {
+      (postings[term] ??= []).push({
+        id: record.id,
+        tf,
+        length: record.documentLength,
+      });
+    }
+  }
+
+  return {
+    postings,
+    averageLength: records.length > 0 ? totalLength / records.length : 0,
+  };
 }
 
 export function buildLocalCatalog(
@@ -178,7 +232,7 @@ export function buildLocalCatalog(
   const currentFiles: CatalogCache["files"] = {};
   const updatedMonths: string[] = [];
   const reusedMonths: string[] = [];
-  const recordsByMonth = new Map<string, CatalogRecord[]>();
+  const recordsByMonth = new Map<string, IndexedCatalogRecord[]>();
 
   for (const month of months) {
     const filePath = storage.knowledgeFileFor(`${month}-01`);
@@ -220,11 +274,19 @@ export function buildLocalCatalog(
   }
 
   const records = months.flatMap((month) => recordsByMonth.get(month) ?? []);
+  const index =
+    updatedMonths.length === 0 && previous?.redactionHash === redactionHash
+      ? {
+          postings: previous.postings,
+          averageLength: previous.averageLength,
+        }
+      : buildPostings(records);
   const cache: CatalogCache = {
-    version: 1,
+    version: 2,
     redactionHash,
     files: currentFiles,
     records,
+    ...index,
   };
 
   mkdirSync(dirname(path), { recursive: true });
@@ -237,7 +299,7 @@ export function buildLocalCatalog(
     total: records.length,
     updatedMonths,
     reusedMonths,
-    records,
+    records: records.map(publicRecord),
   };
 }
 
@@ -250,42 +312,122 @@ export function updateLocalCatalogIfPresent(
   return buildLocalCatalog(storage, workspacePath, redactionLiterals);
 }
 
-export function searchCatalog(
-  records: CatalogRecord[],
-  query: string,
-  limit = 10,
-): CatalogRecord[] {
+function queryTokens(query: string): string[] {
   const tokens =
     query.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}+#.-]{1,}/gu) ?? [];
-  if (tokens.length === 0) return [];
+  return [...new Set(tokens.filter((token) => !STOP_WORDS.has(token)))];
+}
 
-  const scored = records
-    .map((record) => {
-      const title = record.title.toLowerCase();
-      const tags = record.tags.join(" ").toLowerCase();
-      const summary = record.summary.toLowerCase();
-      const workspace = record.workspace.toLowerCase();
-      let score = 0;
-      for (const token of tokens) {
-        if (title.includes(token)) score += 8;
-        if (tags.includes(token)) score += 5;
-        if (summary.includes(token)) score += 2;
-        if (workspace.includes(token)) score += 1;
-      }
-      if (tokens.length > 1 && tokens.every((token) =>
-        `${title} ${tags} ${summary} ${workspace}`.includes(token),
-      )) {
-        score += 3;
-      }
-      return { record, score };
-    })
-    .filter((item) => item.score > 0)
+function rankIndexedCatalog(
+  records: IndexedCatalogRecord[],
+  postings: CatalogCache["postings"],
+  averageLength: number,
+  query: string,
+  limit: number,
+): CatalogRecord[] {
+  const tokens = queryTokens(query);
+  if (tokens.length === 0 || records.length === 0) return [];
+
+  const scores = new Map<string, number>();
+  const totalDocuments = records.length;
+  const k1 = 1.2;
+  const b = 0.75;
+
+  for (const token of tokens) {
+    const matches = postings[token];
+    if (!matches?.length) continue;
+    const documentFrequency = matches.length;
+    const inverseFrequency = Math.log(
+      1 + (totalDocuments - documentFrequency + 0.5) / (documentFrequency + 0.5),
+    );
+    for (const match of matches) {
+      const lengthNorm =
+        k1 *
+        (1 - b + b * match.length / Math.max(averageLength, 1));
+      const score =
+        inverseFrequency *
+        ((match.tf * (k1 + 1)) / (match.tf + lengthNorm));
+      scores.set(match.id, (scores.get(match.id) ?? 0) + score);
+    }
+  }
+
+  const byId = new Map(records.map((record) => [record.id, record]));
+  return [...scores.entries()]
+    .map(([id, score]) => ({ record: byId.get(id), score }))
+    .filter(
+      (item): item is { record: IndexedCatalogRecord; score: number } =>
+        Boolean(item.record),
+    )
     .sort(
       (a, b) =>
         b.score - a.score ||
         b.record.date.localeCompare(a.record.date) ||
         a.record.title.localeCompare(b.record.title),
-    );
+    )
+    .slice(0, Math.max(1, limit))
+    .map((item) => publicRecord(item.record));
+}
 
-  return scored.slice(0, Math.max(1, limit)).map((item) => item.record);
+function publicRecord(record: IndexedCatalogRecord): CatalogRecord {
+  const { termFrequencies: _termFrequencies, documentLength: _documentLength, ...result } =
+    record;
+  return result;
+}
+
+function indexPublicRecord(record: CatalogRecord): IndexedCatalogRecord {
+  const termFrequencies: Record<string, number> = {};
+  const add = (value: string, weight: number): number => {
+    const values =
+      value.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}+#.-]{1,}/gu) ?? [];
+    for (const token of values) {
+      if (token.length < 3 || STOP_WORDS.has(token)) continue;
+      termFrequencies[token] = (termFrequencies[token] ?? 0) + weight;
+    }
+    return values.filter((token) => token.length >= 3 && !STOP_WORDS.has(token))
+      .length;
+  };
+  const length =
+    add(record.title, 3) +
+    add(record.summary, 1) +
+    record.tags.reduce((total, tag) => total + add(tag, 2), 0);
+  return {
+    ...record,
+    termFrequencies,
+    documentLength: Math.max(length, 1),
+  };
+}
+
+export function searchCatalog(
+  records: CatalogRecord[],
+  query: string,
+  limit = 10,
+): CatalogRecord[] {
+  const indexedRecords = records.map(indexPublicRecord);
+  const { postings, averageLength } = buildPostings(indexedRecords);
+  return rankIndexedCatalog(
+    indexedRecords,
+    postings,
+    averageLength,
+    query,
+    limit,
+  );
+}
+
+export function searchLocalCatalog(
+  storage: KnowledgeBase,
+  workspacePath: string,
+  redactionLiterals: readonly string[],
+  query: string,
+  limit = 10,
+): CatalogRecord[] {
+  const build = buildLocalCatalog(storage, workspacePath, redactionLiterals);
+  const cache = loadCache(build.path);
+  if (!cache) return searchCatalog(build.records, query, limit);
+  return rankIndexedCatalog(
+    cache.records,
+    cache.postings,
+    cache.averageLength,
+    query,
+    limit,
+  );
 }

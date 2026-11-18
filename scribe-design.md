@@ -82,7 +82,7 @@ Scribe ships a dependency-free Node CLI (`src/cli.ts`):
   batches writes into a single commit/push.
 - The local AI catalog is generated without model/API calls. It uses extractive summaries and
   automatically derived keyword tags, refreshes changed months incrementally after captures,
-  and returns compact search results with links to canonical Markdown.
+  and returns compact BM25-ranked search results with links to canonical Markdown.
 - Config defaults to `~/.config/scribe/config.json` (XDG-aware) with `workspace`, `remote`,
   `agent`, `autoCommit`, and `autoPush` keys. Precedence is flags → environment → config →
   defaults.

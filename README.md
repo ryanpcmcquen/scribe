@@ -195,8 +195,9 @@ scribe catalog search "concurrent journal sync" --limit 5
 ```
 
 Catalog search returns compact summaries, tags, and source paths, not full note
-bodies. Markdown remains canonical and the cache can be regenerated at any
-time.
+bodies. Results use local BM25-style ranking, so title matches and rare terms
+matter more than raw repetition. Markdown remains canonical and the cache can be
+regenerated at any time.
 
 ### Search & Context Retrieval
 

@@ -33,7 +33,7 @@ import {
   buildLocalCatalog,
   CatalogBuildResult,
   CatalogRecord,
-  searchCatalog,
+  searchLocalCatalog,
   updateLocalCatalogIfPresent,
 } from "./catalog";
 
@@ -411,8 +411,13 @@ export class Scribe {
   }
 
   searchCatalog(query: string, limit = 10): CatalogRecord[] {
-    const catalog = this.buildCatalog();
-    return searchCatalog(catalog.records, query, limit);
+    return searchLocalCatalog(
+      this.storage,
+      this.workspacePath,
+      this.redactionLiterals,
+      query,
+      limit,
+    );
   }
 
   /**

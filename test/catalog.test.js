@@ -108,8 +108,9 @@ test("catalog build and search CLI return compact metadata without AI calls", (t
   assert.equal(init.status, 0, init.stderr);
 
   for (const [title, body] of [
-    ["Rebase remote journal sync", "Git rebase handles concurrent sync."],
+    ["Rebase sync decision", "Git rebase handles concurrent journal updates."],
     ["Markdown entry parser", "The parser preserves nested markdown headings."],
+    ["Long sync notes", `${"sync ".repeat(50)} unrelated details.`],
   ]) {
     const capture = runCli(
       [
@@ -131,7 +132,7 @@ test("catalog build and search CLI return compact metadata without AI calls", (t
 
   const build = runCli(["catalog", "build", "--json"], { env });
   assert.equal(build.status, 0, build.stderr);
-  assert.equal(parseJson(build).total, 2);
+  assert.equal(parseJson(build).total, 3);
   assert.equal(parseJson(build).aiCalls, 0);
 
   const search = runCli(
@@ -142,7 +143,7 @@ test("catalog build and search CLI return compact metadata without AI calls", (t
   const result = parseJson(search);
   assert.equal(result.aiCalls, 0);
   assert.equal(result.results.length, 1);
-  assert.equal(result.results[0].title, "Rebase remote journal sync");
+  assert.equal(result.results[0].title, "Rebase sync decision");
   assert.ok(result.results[0].summary);
   assert.ok(result.results[0].tags.length > 0);
   assert.equal("body" in result.results[0], false);

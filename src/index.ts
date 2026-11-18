@@ -32,6 +32,7 @@ export {
   buildLocalCatalog,
   deriveAutomaticTags,
   extractiveSummary,
+  searchLocalCatalog,
   searchCatalog,
   updateLocalCatalogIfPresent,
 } from "./catalog";
