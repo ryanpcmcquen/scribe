@@ -46,6 +46,9 @@ test("init creates config, month files, and a git repository", (t) => {
       "utf8",
     ).startsWith(`## ${month}`),
   );
+  const journalReadme = readFileSync(`${workspace}/README.md`, "utf8");
+  assert.match(journalReadme, /scribe:toc:start/);
+  assert.match(journalReadme, new RegExp(`\\| ${month} \\| \\[Open\\]`));
 
   const config = parseJson(
     runCli(["config", "--json"], { env }),
@@ -81,6 +84,10 @@ test("capture writes, commits, and reads back knowledge", (t) => {
   assert.equal(captured.committed, true);
   assert.equal(captured.pushed, false);
   assert.ok(existsSync(captured.path));
+  assert.match(
+    readFileSync(`${dir}/journal/README.md`, "utf8"),
+    /\| \d{4}-\d{2} \| \[Open\]\(\.\/knowledge\//,
+  );
 
   const read = parseJson(runCli(["read", "--json"], { env }));
   assert.equal(read.entries.length, 1);

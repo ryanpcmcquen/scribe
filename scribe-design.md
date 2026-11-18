@@ -1,8 +1,9 @@
 # Scribe — Design Document
 
 > Status: implemented core, capture reliability, reminder lifecycle, search/context,
-> Flint merge, sync/rebase, redaction, stats, packaging checks, and concurrency locking.
-> Updated on 2026-11-17.
+> Flint merge, sync/rebase, redaction, stats, packaging checks, concurrency locking,
+> multi-source import, local BM25 catalog, and automatic journal README index.
+> Updated on 2026-11-18.
 
 ## Purpose
 
@@ -222,6 +223,8 @@ Flint produces a ranked focus list and overview from this merged input.
 - Read-only journal verification for malformed markdown records and likely secrets.
 - Reachable Git history scanning and configurable exact-literal redaction.
 - Multi-format knowledge import and a local, incrementally refreshed AI retrieval catalog.
+- Automatic README monthly index maintenance in the journal, preserving content outside its
+  managed table-of-contents section.
 - Verified global skill destinations for OpenCode, Claude Code, Codex, Cline, and Antigravity.
 - GitHub Actions CI, repository privacy/style checks, and npm package archive smoke tests.
 

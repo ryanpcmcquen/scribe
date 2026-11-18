@@ -1,6 +1,7 @@
 import { DEFAULT_WORKSPACE } from "./config";
 import { Git, SyncResult } from "./git";
 import { withWorkspaceLock } from "./lock";
+import { updateJournalReadmeIndex } from "./journal-index";
 import {
   KnowledgeBase,
   KnowledgeEntry,
@@ -122,17 +123,26 @@ export class Scribe {
     };
   }
 
+  private refreshJournalReadme(): void {
+    try {
+      updateJournalReadmeIndex(this.workspacePath, this.storage);
+    } catch {}
+  }
+
   /**
    * Synchronize the journal repository with its configured remote: commit
    * uncommitted local changes, pull with rebase/autostash, and push.
    */
   async sync(commitMessage?: string): Promise<SyncResult> {
     return withWorkspaceLock(this.workspacePath, () =>
-      this.git.sync({
-        commitMessage,
-        autoCommit: this.autoCommit,
-        autoPush: this.autoPush,
-      }),
+      {
+        this.refreshJournalReadme();
+        return this.git.sync({
+          commitMessage,
+          autoCommit: this.autoCommit,
+          autoPush: this.autoPush,
+        });
+      },
     );
   }
 
@@ -160,6 +170,7 @@ export class Scribe {
         ? this.storage.appendKnowledgeEntry(sanitizedEntry)
         : this.storage.appendReminder(sanitizedEntry);
 
+    this.refreshJournalReadme();
     const gitOutcome = await this.commitAndPush(
       `Scribe: ${sanitizedEntry.date} — ${sanitizedEntry.title}`,
     );
@@ -203,6 +214,7 @@ export class Scribe {
         created++;
       }
 
+      if (created > 0) this.refreshJournalReadme();
       const gitOutcome =
         created > 0
           ? await this.commitAndPush(
@@ -255,6 +267,7 @@ export class Scribe {
       completedAt: options.completedAt,
     });
     const sanitizedReminder = this.storage.sanitizeReminderEntry(updated);
+    this.refreshJournalReadme();
 
     const commitSummary =
       status === "done"

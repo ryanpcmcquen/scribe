@@ -399,6 +399,7 @@ scribe/
     date.ts
     import/
     index.ts
+    journal-index.ts
     lock.ts
     scribe.ts
     hooks/
@@ -445,4 +446,5 @@ hook installers, MCP/hooks/OpenCode plugin capture reliability, deduplication,
 and heuristic secret/home-path redaction are implemented and tested.
 `scribe verify` audits current files and reachable Git history. CI covers typechecking,
 the test suite, and privacy checks; the package artifact is smoke-tested to
-ensure skill templates ship with the CLI.
+ensure skill templates ship with the CLI. Captures and syncs maintain the Scribe
+journal README's monthly index while preserving content outside its managed section.

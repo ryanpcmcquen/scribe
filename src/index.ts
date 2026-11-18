@@ -26,6 +26,7 @@ export {
 export { buildContextPack, searchKnowledgeBase } from "./search";
 export { computeStats } from "./stats";
 export { verifyJournal } from "./verify";
+export { updateJournalReadmeIndex } from "./journal-index";
 export { importHeadersFromEnv, prepareImport } from "./import";
 export type { ImportFormat, ImportOptions, PreparedImport } from "./import";
 export {

@@ -46,8 +46,10 @@ import {
   formatFocusBullets,
 } from "./merge";
 import { Scribe } from "./scribe";
+import { updateJournalReadmeIndex } from "./journal-index";
 import {
   effectiveReminderStatus,
+  KnowledgeBase,
   KnowledgeEntry,
   ReminderEntry,
   ReminderStatus,
@@ -412,6 +414,10 @@ function commandInit(
 
   const month = currentMonth();
   ensureMonthFiles(config.workspace, month);
+  updateJournalReadmeIndex(
+    config.workspace,
+    new KnowledgeBase(config.workspace, config.redactionLiterals),
+  );
 
   if (configCreated) {
     saveConfig(config, configPath);
